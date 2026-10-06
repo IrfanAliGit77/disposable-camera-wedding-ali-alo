@@ -364,7 +364,7 @@ function actAdminSaveSettings_(d) {
       cameraOpen: bool_(pick_(inp.cameraOpen, cur.cameraOpen)),
       shotsPerGuest: clamp_(pick_(inp.shotsPerGuest, cur.shotsPerGuest), 1, 999),
       allowVideo: bool_(pick_(inp.allowVideo, cur.allowVideo)),
-      maxVideoSeconds: clamp_(pick_(inp.maxVideoSeconds, cur.maxVideoSeconds), 3, 120),
+      maxVideoSeconds: clamp_(pick_(inp.maxVideoSeconds, cur.maxVideoSeconds), 3, 1200),
       allowLibrary: bool_(pick_(inp.allowLibrary, cur.allowLibrary)),
       albumMode: pick_(inp.albumMode, cur.albumMode) === 'live' ? 'live' : 'reveal',
       revealAt: cur.revealAt,

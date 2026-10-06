@@ -333,3 +333,72 @@ svg.ic { width: 1.25em; height: 1.25em; fill: none; stroke: currentColor; stroke
 .danger-zone { border-top: 1px solid var(--cream-dark); margin-top: 1.6rem; padding-top: 1.2rem; }
 .backlink { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.68rem; letter-spacing: 0.2em; text-transform: uppercase; text-decoration: none; background: none; border: 0; color: var(--sage-dark); margin-bottom: 1rem; }
 code.kbd { font-family: 'Courier New', monospace; background: var(--cream-dark); padding: 0.1rem 0.4rem; font-size: 0.85em; }
+
+/* ============================================================
+   v3 — PILIHAN FILTER & PEMUTAR VIDEO
+   ============================================================ */
+.cam-filters {
+  flex: none; display: flex; gap: 0.45rem; padding: 0.55rem 1rem 0.1rem; overflow-x: auto;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity;
+}
+.cam-filters::-webkit-scrollbar { display: none; }
+.cam-filters::before, .cam-filters::after { content: ''; flex: 1 0 0.01px; }   /* rata tengah kalau muat, tetap bisa digeser kalau tidak */
+.cam-filters button {
+  flex: none; display: inline-flex; align-items: center; gap: 0.4rem; scroll-snap-align: center;
+  padding: 0.38rem 0.75rem; border: 1px solid rgba(240,232,219,0.22); background: rgba(255,255,255,0.04);
+  color: rgba(240,232,219,0.7); font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap;
+  border-radius: 999px; transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+}
+.cam-filters button i { width: 9px; height: 9px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.45); flex: none; }
+.cam-filters button.active { background: var(--gold); border-color: var(--gold); color: var(--ink); }
+.cam-filters button.active i { border-color: rgba(40,42,37,0.5); }
+@media (max-height: 620px) { .cam-filters { padding-top: 0.35rem; } .cam-filters button { padding: 0.28rem 0.65rem; } }
+
+/* pemutar video di album */
+.player { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.player video { max-width: 100%; max-height: 100%; width: auto; height: auto; background: #000; box-shadow: 0 20px 60px rgba(0,0,0,0.6); outline: none; }
+.player-fallback { text-align: center; padding: 2rem 1.5rem; max-width: 22rem; }
+.player-fallback p { font-family: var(--font-display); font-style: italic; font-size: 1.15rem; color: rgba(240,232,219,0.85); margin-bottom: 1.2rem; }
+
+/* di HP: panah pindah foto diletakkan di baris bawah, supaya tidak menutupi video */
+@media (max-width: 640px) {
+  .lb-nav { display: inline-flex; top: auto; transform: none; bottom: calc(0.8rem + env(safe-area-inset-bottom)); }
+  .lb-nav.prev { left: auto; right: 7.4rem; }
+  .lb-nav.next { right: 4.2rem; }
+  .lb-meta { max-width: calc(100vw - 12.5rem); }
+  .lb-bar { align-items: flex-end; }
+  .lb-stage { padding-left: 0; padding-right: 0; }
+}
+
+/* ============================================================
+   v3.1 — TOMBOL ALBUM BERLABEL + PETUNJUK
+   ============================================================ */
+.cam-top { position: relative; }
+.album-btn {
+  display: inline-flex; align-items: center; gap: 0.45rem; height: 44px; padding: 0 0.95rem 0 0.8rem; flex: none;
+  border: 1px solid var(--gold); border-radius: 999px; background: rgba(201,169,110,0.14); color: var(--cream);
+  font-size: 0.66rem; letter-spacing: 0.2em; text-transform: uppercase; text-decoration: none;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+.album-btn:hover { background: var(--gold); color: var(--ink); }
+.album-btn.pulse { animation: albumPulse 1.6s ease-in-out 3; }
+@keyframes albumPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(201,169,110,0.55); } 50% { box-shadow: 0 0 0 9px rgba(201,169,110,0); } }
+.coach {
+  position: absolute; top: calc(100% + 6px); right: 1rem; z-index: 20; width: min(15.5rem, calc(100vw - 2rem));
+  background: var(--cream); color: var(--charcoal); padding: 0.75rem 0.9rem; text-align: left; cursor: pointer;
+  border: 1px solid var(--gold); box-shadow: 0 14px 34px rgba(0,0,0,0.45); animation: coachIn 0.4s ease both;
+}
+.coach::before {   /* panah kecil menunjuk tombol Album */
+  content: ''; position: absolute; top: -7px; right: 2.2rem; width: 12px; height: 12px; background: var(--cream);
+  border-left: 1px solid var(--gold); border-top: 1px solid var(--gold); transform: rotate(45deg);
+}
+.coach b { display: block; font-family: var(--font-display); font-style: italic; font-weight: 500; font-size: 1.1rem; line-height: 1.2; margin-bottom: 0.2rem; }
+.coach span { font-size: 0.8rem; line-height: 1.45; color: var(--charcoal-light); display: block; }
+.coach em { font-style: normal; font-weight: 600; color: var(--sage-dark); }
+@keyframes coachIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+/* foto kecil hasil jepretan terakhir: bisa diketuk untuk membuka album */
+.vf-last-link { position: absolute; left: 14px; bottom: 14px; z-index: 3; width: 54px; height: 72px; display: block; pointer-events: none; }
+.vf-last-link .vf-last { position: static; }
+.vf-last-link.show { pointer-events: auto; }
+@media (max-width: 360px) { .album-btn { padding: 0 0.7rem 0 0.6rem; letter-spacing: 0.12em; } .cam-brand { font-size: 1.05rem; } }
+.album-btn svg.ic { width: 18px; height: 18px; }

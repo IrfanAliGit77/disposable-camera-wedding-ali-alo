@@ -80,9 +80,14 @@
         <div class="cam-top">
             <span class="counter" id="c-counter" aria-live="polite">27<small>SISA</small></span>
             <span class="cam-brand" id="c-brand"></span>
-            <a class="icon-btn" href="gallery.html" id="c-album" aria-label="Lihat album" title="Album">
-                <svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="14" height="14" rx="1.5"/><path d="M7 3h12.5A1.5 1.5 0 0 1 21 4.5V17"/><path d="m3 15 4-4 4 4 2-2 4 4"/></svg>
+<a class="album-btn" href="gallery.html" id="c-album" aria-label="Lihat album foto">
+                <svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="14" height="14" rx="1.5"/><path d="M7 3h12.5A1.5 1.5 0 0 1 21 4.5V17"/><path d="m3 15 4-4 4 4 2-2 4 4"/></svg><span>Album</span>
             </a>
+            <!-- Petunjuk kecil: muncul saat pertama masuk kamera dan setelah jepretan pertama -->
+            <div class="coach" id="c-coach" role="status" hidden>
+                <b>Lihat hasil fotomu di sini</b>
+                <span>Ketuk <em>Album</em> untuk melihat jepretanmu dan foto tamu lain.</span>
+            </div>
         </div>
 
         <div class="cam-stage">
@@ -91,7 +96,7 @@
                 <span class="vf-corner tl"></span><span class="vf-corner tr"></span><span class="vf-corner bl"></span><span class="vf-corner br"></span>
                 <span class="vf-stamp" id="c-stamp"></span>
                 <span class="vf-rec" id="c-rec" hidden><i></i><span id="c-rec-time">0:00</span></span>
-                <img class="vf-last" id="c-last" alt="">
+                <a class="vf-last-link" id="c-last-link" href="gallery.html" aria-label="Buka album"><img class="vf-last" id="c-last" alt=""></a>
                 <div class="vf-flash" id="c-flash"></div>
                 <div class="vf-shutter" id="c-shut"></div>
                 <div class="vf-msg" id="c-msg" hidden>
@@ -103,6 +108,9 @@
         </div>
 
         <div class="cam-status" id="c-status"></div>
+
+        <!-- Pilihan filter (hanya untuk foto) -->
+        <div class="cam-filters" id="c-filters" role="radiogroup" aria-label="Pilih filter foto"></div>
 
         <div class="cam-modes" id="c-modes">
             <button type="button" data-mode="photo" class="active">Foto</button>

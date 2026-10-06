@@ -70,6 +70,14 @@
   WC.thumb = function (fileId, width) { return 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(fileId) + '&sz=w' + (width || 600); };
   WC.thumbAlt = function (fileId, width) { return 'https://lh3.googleusercontent.com/d/' + encodeURIComponent(fileId) + '=w' + (width || 600); };
   WC.downloadUrl = function (fileId) { return 'https://drive.google.com/uc?export=download&id=' + encodeURIComponent(fileId); };
+  // Alamat untuk memutar video langsung dengan pemutar bawaan HP (dicoba berurutan sampai ada yang jalan)
+  WC.videoSources = function (fileId) {
+    const id = encodeURIComponent(fileId), list = [];
+    if (C.DRIVE_API_KEY) list.push('https://www.googleapis.com/drive/v3/files/' + id + '?alt=media&key=' + encodeURIComponent(C.DRIVE_API_KEY));
+    list.push('https://drive.usercontent.google.com/download?id=' + id + '&export=download');
+    list.push('https://drive.google.com/uc?export=download&id=' + id);
+    return list;
+  };
   WC.previewUrl = function (fileId) { return 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/preview'; };
 
   // Gambar Drive kadang belum siap sesaat setelah upload: coba ulang cepat, bergantian antara dua alamat

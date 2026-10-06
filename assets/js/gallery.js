@@ -169,16 +169,16 @@
 
   /* ---------- lightbox ---------- */
   function openLb(i) { if (i < 0) return; state.index = i; showLb(); el.lb.classList.add('open'); document.body.style.overflow = 'hidden'; }
-  function closeLb() { el.lb.classList.remove('open'); el.lbStage.innerHTML = ''; document.body.style.overflow = ''; }
+  function stopVideo() { const v = el.lbStage.querySelector('video'); if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) { /* abaikan */ } } }
+  function closeLb() { stopVideo(); el.lb.classList.remove('open'); el.lbStage.innerHTML = ''; document.body.style.overflow = ''; }
   function showLb() {
     const it = state.view[state.index];
     if (!it) return closeLb();
+    stopVideo();
     el.lbStage.innerHTML = '';
     const loc = it.pending ? { id: it.localId } : localFor(it.fileId);
     if (it.type === 'video' && !it.pending) {
-      const f = document.createElement('iframe');
-      f.src = WC.previewUrl(it.fileId); f.allow = 'autoplay; fullscreen'; f.allowFullscreen = true; f.title = 'Video dari ' + it.guest;
-      el.lbStage.appendChild(f);
+      el.lbStage.appendChild(makePlayer(it, loc && state.localUrls[loc.id]));
     } else {
       const img = document.createElement('img');
       img.alt = 'Foto dari ' + it.guest;
@@ -195,6 +195,28 @@
     el.lbDl.hidden = !!it.pending;
     if (!it.pending) el.lbDl.href = WC.downloadUrl(it.fileId);
   }
+  // Pemutar video bawaan HP (bukan pemutar Google Drive yang tombolnya bertumpuk di layar kecil)
+  function makePlayer(it, localPoster) {
+    const wrap = document.createElement('div');
+    wrap.className = 'player';
+    const v = document.createElement('video');
+    v.controls = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
+    v.preload = 'metadata'; v.poster = localPoster || WC.thumb(it.fileId, 1000);
+    v.setAttribute('controlslist', 'nodownload noplaybackrate'); v.disablePictureInPicture = true;
+    v.setAttribute('aria-label', 'Video dari ' + it.guest);
+    const sources = WC.videoSources(it.fileId);
+    let n = 0;
+    const fail = function () {
+      if (++n < sources.length) { v.src = sources[n]; v.load(); return; }
+      // semua alamat gagal (biasanya video terlalu besar / masih diproses Drive): tawarkan buka di Drive
+      wrap.innerHTML = '<div class="player-fallback"><p>Video ini belum bisa diputar langsung di sini.</p>' +
+        '<a class="btn gold small" target="_blank" rel="noopener" href="' + WC.esc(WC.previewUrl(it.fileId)) + '">Putar di Google Drive</a></div>';
+    };
+    v.addEventListener('error', fail);
+    v.src = sources[0];
+    wrap.appendChild(v);
+    return wrap;
+  }
   function stepLb(d) { const n = state.view.length; if (!n) return; state.index = (state.index + d + n) % n; showLb(); }
   $('#lb-close').addEventListener('click', closeLb);
   $('#lb-prev').addEventListener('click', function () { stepLb(-1); });
@@ -202,7 +224,10 @@
   el.lb.addEventListener('click', function (e) { if (e.target === el.lbStage) closeLb(); });
   let tx = 0;
   el.lbStage.addEventListener('touchstart', function (e) { tx = e.touches[0].clientX; }, { passive: true });
-  el.lbStage.addEventListener('touchend', function (e) { const dx = e.changedTouches[0].clientX - tx; if (Math.abs(dx) > 50) stepLb(dx < 0 ? 1 : -1); });
+  el.lbStage.addEventListener('touchend', function (e) {
+    if (e.target.closest && e.target.closest('video')) return;      // geser di atas video = menggeser durasi, bukan pindah foto
+    const dx = e.changedTouches[0].clientX - tx; if (Math.abs(dx) > 50) stepLb(dx < 0 ? 1 : -1);
+  });
   document.addEventListener('keydown', function (e) {
     if (el.ss.classList.contains('open')) { if (e.key === 'Escape') stopSs(); return; }
     if (!el.lb.classList.contains('open')) return;

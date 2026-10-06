@@ -7,11 +7,11 @@
   const $ = WC.$;
   const el = {
     welcome: $('#welcome'), cam: $('#cam'), form: $('#w-form'), name: $('#w-name'), start: $('#w-start'),
-    wErr: $('#w-error'), wClosed: $('#w-closed'), wShots: $('#w-shots'), wReveal: $('#w-reveal'), wTitle: $('#w-title'), wSub: $('#w-sub'), wInvite: $('#w-invite'), wDate: $('#w-date'), wPhoto: $('#w-photo'), wMono: $('#w-mono'), wAlbum: $('#w-album'), cAlbum: $('#c-album'),
+    wErr: $('#w-error'), wClosed: $('#w-closed'), wShots: $('#w-shots'), wReveal: $('#w-reveal'), wTitle: $('#w-title'), wSub: $('#w-sub'), wInvite: $('#w-invite'), wDate: $('#w-date'), wPhoto: $('#w-photo'), wMono: $('#w-mono'), wAlbum: $('#w-album'), cAlbum: $('#c-album'), coach: $('#c-coach'), lastLink: $('#c-last-link'),
     video: $('#c-video'), counter: $('#c-counter'), brand: $('#c-brand'), stamp: $('#c-stamp'),
     rec: $('#c-rec'), recTime: $('#c-rec-time'), last: $('#c-last'), flash: $('#c-flash'), shut: $('#c-shut'),
     msg: $('#c-msg'), msgText: $('#c-msg-text'), native: $('#c-native'), retry: $('#c-retry'),
-    status: $('#c-status'), modes: $('#c-modes'), modeVideo: $('#c-mode-video'),
+    status: $('#c-status'), filters: $('#c-filters'), modes: $('#c-modes'), modeVideo: $('#c-mode-video'),
     flashBtn: $('#c-flash-btn'), libBtn: $('#c-lib-btn'), shutter: $('#c-shutter'), ring: $('#c-ring'), sw: $('#c-switch'),
     nativeInput: $('#c-native-input'), libInput: $('#c-lib-input'), screenFlash: $('#screen-flash')
   };
@@ -19,7 +19,7 @@
   const state = {
     settings: { shotsPerGuest: 27, allowVideo: true, maxVideoSeconds: 15, allowLibrary: true, cameraOpen: true, dateStamp: true, guestsSeeOwn: true },
     used: 0, stream: null, cover: '', facing: 'environment', mode: 'photo', flashOn: false,
-    busy: false, recorder: null, recTimer: null, recStart: 0, libActive: 0, lastUrl: null, ready: false
+    filter: 'klasik', busy: false, recorder: null, recTimer: null, recStart: 0, libActive: 0, lastUrl: null, ready: false
   };
 
   /* ---------- sambutan ---------- */
@@ -84,6 +84,7 @@
     startCamera();
     WC.prewarm();
     updateCounter(); updateStatus();
+    setTimeout(showCoach, 1200);
   });
 
   /* ---------- kamera ---------- */
@@ -137,8 +138,34 @@
       WC.$$('button', el.modes).forEach(function (x) { x.classList.toggle('active', x === b); });
       el.shutter.classList.toggle('video', state.mode === 'video');
       el.shutter.setAttribute('aria-label', state.mode === 'video' ? 'Rekam video' : 'Jepret');
+      paintPreview();
       startCamera();
     });
+  });
+
+  /* ---------- pilihan filter ---------- */
+  function setFilter(id, quiet) {
+    const f = WCFilm.get(id);
+    state.filter = f.id;
+    WC.store('wc_filter', f.id);
+    WC.$$('button', el.filters).forEach(function (b) {
+      const on = b.dataset.id === f.id;
+      b.classList.toggle('active', on); b.setAttribute('aria-checked', String(on));
+      if (on && !quiet && b.scrollIntoView) b.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    });
+    paintPreview();
+  }
+  // Pratinjau memakai pendekatan efeknya; video direkam tanpa filter, jadi pratinjaunya juga polos
+  function paintPreview() {
+    el.video.style.filter = state.mode === 'video' ? 'none' : WCFilm.get(state.filter).css;
+    el.filters.hidden = state.mode === 'video';
+  }
+  WCFilm.FILTERS.forEach(function (f) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.dataset.id = f.id; b.setAttribute('role', 'radio');
+    b.innerHTML = '<i style="background:' + f.dot + '"></i>' + WC.esc(f.name);
+    b.addEventListener('click', function () { setFilter(f.id); });
+    el.filters.appendChild(b);
   });
 
   /* ---------- hitungan sisa film ---------- */
@@ -159,6 +186,20 @@
     if (typeof progress === 'number') html += '<span class="bar"><i style="width:' + Math.round(progress * 100) + '%"></i></span>';
     el.status.innerHTML = html;
   }
+
+  /* ---------- petunjuk "album ada di sini" ----------
+     Muncul saat pertama masuk kamera dan setelah jepretan pertama (maksimal 3 kali per HP). */
+  function showCoach() {
+    const seen = Number(WC.store('wc_coach') || 0);
+    if (seen >= 3 || !el.coach.hidden) return;
+    WC.store('wc_coach', String(seen + 1));
+    el.coach.hidden = false;
+    el.cAlbum.classList.remove('pulse'); void el.cAlbum.offsetWidth; el.cAlbum.classList.add('pulse');
+    clearTimeout(showCoach.t);
+    showCoach.t = setTimeout(hideCoach, 7000);
+  }
+  function hideCoach() { el.coach.hidden = true; }
+  el.coach.addEventListener('click', hideCoach);
 
   /* ---------- suara rana (dibuat langsung, tanpa file audio) ---------- */
   let actx = null;
@@ -208,7 +249,7 @@
       const canvas = WCFilm.frameToCanvas(v, v.videoWidth, v.videoHeight, { mirror: state.mirror && !!C.MIRROR_SELFIE });
       flashOff();
       clickSound(); animate(el.shut); if (state.flashOn) animate(el.flash);
-      WCFilm.apply(canvas, { stamp: state.settings.dateStamp });
+      WCFilm.apply(canvas, { filter: state.filter, stamp: state.settings.dateStamp });
       const blob = await WCFilm.toBlob(canvas, 0.88);
       await enqueue(blob, 'photo', await WCFilm.thumbBlob(canvas));
     } catch (e) { WC.toast('Gagal mengambil foto: ' + e.message); }
@@ -219,14 +260,15 @@
     const item = await WC.queue.add(blob, { event: WC.event, source: 'camera', type: type, guest: WC.guestName() });
     WC.thumbs.add(item.id, WC.event, thumb || null, type);       // salinan kecil: langsung tampil di album
     updateCounter(); updateStatus();
+    if (!state.coachedAfterShot) { state.coachedAfterShot = true; setTimeout(showCoach, 900); }
     if (type === 'photo' && state.settings.guestsSeeOwn) showLast(thumb || blob);
   }
   function showLast(blob) {
     if (state.lastUrl) URL.revokeObjectURL(state.lastUrl);
     state.lastUrl = URL.createObjectURL(blob);
-    el.last.src = state.lastUrl; el.last.classList.add('show');
+    el.last.src = state.lastUrl; el.last.classList.add('show'); el.lastLink.classList.add('show');
     clearTimeout(showLast.t);
-    showLast.t = setTimeout(function () { el.last.classList.remove('show'); }, 2600);
+    showLast.t = setTimeout(function () { el.last.classList.remove('show'); el.lastLink.classList.remove('show'); }, 3500);
   }
 
   /* ---------- rekam video ---------- */
@@ -286,7 +328,7 @@
     try {
       const img = await loadImage(f);
       const canvas = WCFilm.frameToCanvas(img, img.naturalWidth || img.width, img.naturalHeight || img.height, {});
-      WCFilm.apply(canvas, { stamp: state.settings.dateStamp });
+      WCFilm.apply(canvas, { filter: state.filter, stamp: state.settings.dateStamp });
       const blob = await WCFilm.toBlob(canvas, 0.88);
       clickSound();
       await enqueue(blob, 'photo', await WCFilm.thumbBlob(canvas));
@@ -344,7 +386,8 @@
   /* ---------- mulai ---------- */
   el.name.value = WC.guestName();
   if (C.INVITATION_URL) { el.wInvite.hidden = false; el.wInvite.href = C.INVITATION_URL; }
-  el.wAlbum.href = WC.link('gallery.html'); el.cAlbum.href = WC.link('gallery.html');
+  el.wAlbum.href = WC.link('gallery.html'); el.cAlbum.href = WC.link('gallery.html'); el.lastLink.href = WC.link('gallery.html');
+  setFilter(WC.store('wc_filter') || 'klasik', true);
   applySettings({});
   loadConfig();
   WC.queue.primary = true;
