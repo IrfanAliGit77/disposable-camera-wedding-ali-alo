@@ -133,6 +133,130 @@
     return canvas;
   };
 
+  /* ============================================================
+     FILTER UNTUK VIDEO
+     Tiap bingkai kamera digambar ulang lewat WebGL (kartu grafis HP)
+     dengan rumus warna yang sama seperti foto, lalu hasilnya yang direkam.
+     Mengembalikan null kalau HP tidak mendukung (video direkam polos).
+     ============================================================ */
+  const VS = 'attribute vec2 p; varying vec2 v; void main(){ v = p * 0.5 + 0.5; gl_Position = vec4(p, 0.0, 1.0); }';
+  const FS = [
+    'precision mediump float;',
+    'varying vec2 v;',
+    'uniform sampler2D uTex, uStamp;',
+    'uniform vec4 uCrop;',                       // x, y, lebar, tinggi bagian sumber yang dipakai (0..1)
+    'uniform vec3 uMul, uAdd, uTint;',
+    'uniform float uContrast, uLift, uSat, uMono, uVig, uGrain, uTime, uHasStamp;',
+    'void main(){',
+    '  vec3 c = texture2D(uTex, uCrop.xy + v * uCrop.zw).rgb;',
+    '  vec3 s = c * c * (3.0 - 2.0 * c);',
+    '  c = uLift + mix(c, s, uContrast) * (1.0 - uLift);',
+    '  c = clamp(c * uMul + uAdd, 0.0, 1.0);',
+    '  float l = dot(c, vec3(0.299, 0.587, 0.114));',
+    '  c = uMono > 0.5 ? l * uTint : mix(vec3(l), c, uSat);',
+    '  float d = distance(v, vec2(0.5)) / 0.7071;',
+    '  c = mix(c, vec3(0.078, 0.047, 0.0), smoothstep(0.45, 1.0, d) * uVig);',
+    '  float n = fract(sin(dot(v * 917.0 + uTime, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;',
+    '  c += n * uGrain;',
+    '  if (uHasStamp > 0.5) { vec4 st = texture2D(uStamp, v); c = mix(c, st.rgb, st.a); }',
+    '  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);',
+    '}'
+  ].join('\n');
+
+  Film.createVideoFilter = function (video, opts) {
+    opts = opts || {};
+    try {
+      const sw = video.videoWidth, sh = video.videoHeight;
+      if (!sw || !sh) return null;
+      const ratio = 3 / 4;
+      let cw = sw, ch = sh;
+      if (cw / ch > ratio) cw = ch * ratio; else ch = cw / ratio;
+      const H = Math.min(960, Math.round(ch)), W = Math.round(H * ratio);     // 720x960: ringan dan tetap tajam di HP
+
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      if (!canvas.captureStream) return null;
+      const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, alpha: false, antialias: false }) ||
+                 canvas.getContext('experimental-webgl', { preserveDrawingBuffer: true, alpha: false });
+      if (!gl) return null;
+
+      const sh1 = function (type, src) {
+        const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));
+        return o;
+      };
+      const prog = gl.createProgram();
+      gl.attachShader(prog, sh1(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh1(gl.FRAGMENT_SHADER, FS));
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('link');
+      gl.useProgram(prog);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(prog, 'p');
+      gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      const U = function (n) { return gl.getUniformLocation(prog, n); };
+      const tex = function (unit) {
+        const t = gl.createTexture();
+        gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        return t;
+      };
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      const tVideo = tex(0);
+      gl.uniform1i(U('uTex'), 0); gl.uniform1i(U('uStamp'), 1);
+      gl.uniform4f(U('uCrop'), (sw - cw) / 2 / sw, (sh - ch) / 2 / sh, cw / sw, ch / sh);
+      gl.viewport(0, 0, W, H);
+
+      // cap tanggal: digambar sekali di canvas biasa, lalu ditempel di tiap bingkai
+      let hasStamp = false;
+      if (opts.stamp !== false) {
+        const sc = document.createElement('canvas'); sc.width = W; sc.height = H;
+        const c2 = sc.getContext('2d'), size = Math.round(Math.min(W, H) * 0.042);
+        c2.font = '700 ' + size + 'px "Courier New", Courier, monospace';
+        c2.textAlign = 'right'; c2.shadowColor = 'rgba(255,110,20,0.9)'; c2.shadowBlur = size * 0.35; c2.fillStyle = '#ffb347';
+        c2.fillText(Film.dateText(opts.date), W - size * 1.1, H - size * 1.1);
+        tex(1);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sc);
+        hasStamp = true;
+      }
+      gl.uniform1f(U('uHasStamp'), hasStamp ? 1 : 0);
+
+      const api = { canvas: canvas, running: false };
+      api.setFilter = function (id) {
+        const f = Film.get(id);
+        gl.uniform3f(U('uMul'), f.r[0], f.g[0], f.b[0]);
+        gl.uniform3f(U('uAdd'), f.r[1], f.g[1], f.b[1]);
+        const t = f.tint || [1, 1, 1];
+        gl.uniform3f(U('uTint'), t[0], t[1], t[2]);
+        gl.uniform1f(U('uContrast'), f.contrast); gl.uniform1f(U('uLift'), f.lift);
+        gl.uniform1f(U('uSat'), f.sat); gl.uniform1f(U('uMono'), f.sat === 0 ? 1 : 0);
+        gl.uniform1f(U('uVig'), f.vignette); gl.uniform1f(U('uGrain'), f.grain / 255);
+      };
+      api.setFilter(opts.filter);
+      const uTime = U('uTime');
+      api.draw = function () {
+        if (video.readyState < 2) return;
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tVideo);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+        gl.uniform1f(uTime, (performance.now() % 1000) / 37.0);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      };
+      let raf = 0;
+      const loop = function () { if (!api.running) return; api.draw(); raf = requestAnimationFrame(loop); };
+      api.start = function () { api.running = true; api.draw(); loop(); };
+      api.stop = function () {
+        api.running = false; cancelAnimationFrame(raf);
+        const ext = gl.getExtension('WEBGL_lose_context'); if (ext) ext.loseContext();
+      };
+      api.draw();
+      if (gl.getError() !== gl.NO_ERROR) return null;
+      api.stream = canvas.captureStream(30);
+      return api;
+    } catch (e) { return null; }
+  };
+
   // Gambar sumber (video / gambar) ke canvas potret 3:4, dipotong di tengah
   Film.frameToCanvas = function (source, sw, sh, opts) {
     opts = opts || {};

@@ -402,3 +402,25 @@ code.kbd { font-family: 'Courier New', monospace; background: var(--cream-dark);
 .vf-last-link.show { pointer-events: auto; }
 @media (max-width: 360px) { .album-btn { padding: 0 0.7rem 0 0.6rem; letter-spacing: 0.12em; } .cam-brand { font-size: 1.05rem; } }
 .album-btn svg.ic { width: 18px; height: 18px; }
+
+/* ============================================================
+   v3.2 — FILTER VIDEO & TOMBOL FLASH
+   ============================================================ */
+/* hasil filter yang sebenarnya, ditampilkan menutupi pratinjau selama merekam */
+.viewfinder .vf-canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+.viewfinder .vf-canvas.mirror { transform: scaleX(-1); }
+
+/* Di layar sentuh, efek "hover" menempel setelah diketuk sehingga tombol terlihat masih menyala.
+   Efek hover sekarang hanya untuk perangkat ber-mouse. */
+@media (hover: none) {
+  .icon-btn:hover:not(.on) { background: rgba(255,255,255,0.05); color: var(--cream); }
+  .album-btn:hover { background: rgba(201,169,110,0.14); color: var(--cream); }
+  .btn:hover { background: var(--sage); border-color: var(--sage); }
+  .btn.ghost:hover { background: transparent; color: var(--sage-dark); }
+  .btn.gold:hover { background: var(--gold); border-color: var(--gold); }
+  .btn.danger:hover { background: transparent; color: var(--danger); }
+}
+/* flash mati = ikon dicoret; flash nyala = tombol emas tanpa coretan */
+#c-flash-btn { position: relative; }
+#c-flash-btn:not(.on)::after { content: ''; position: absolute; left: 50%; top: 50%; width: 27px; height: 1.5px; background: currentColor; transform: translate(-50%, -50%) rotate(-45deg); opacity: 0.85; }
+#c-flash-btn.on { background: var(--gold); color: var(--ink); box-shadow: 0 0 0 4px rgba(201,169,110,0.25); }

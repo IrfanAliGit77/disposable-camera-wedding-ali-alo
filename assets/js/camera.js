@@ -130,6 +130,8 @@
     state.flashOn = !state.flashOn;
     el.flashBtn.classList.toggle('on', state.flashOn);
     el.flashBtn.setAttribute('aria-pressed', String(state.flashOn));
+    el.flashBtn.blur();
+    WC.toast(state.flashOn ? 'Flash menyala' : 'Flash mati', 1200);
   });
   WC.$$('button', el.modes).forEach(function (b) {
     b.addEventListener('click', function () {
@@ -155,10 +157,10 @@
     });
     paintPreview();
   }
-  // Pratinjau memakai pendekatan efeknya; video direkam tanpa filter, jadi pratinjaunya juga polos
+  // Pratinjau memakai pendekatan efeknya (berlaku untuk foto maupun video)
   function paintPreview() {
-    el.video.style.filter = state.mode === 'video' ? 'none' : WCFilm.get(state.filter).css;
-    el.filters.hidden = state.mode === 'video';
+    el.video.style.filter = WCFilm.get(state.filter).css;
+    if (state.vfx) state.vfx.setFilter(state.filter);       // sedang merekam: ganti filter langsung terlihat
   }
   WCFilm.FILTERS.forEach(function (f) {
     const b = document.createElement('button');
@@ -281,9 +283,21 @@
     if (remaining() <= 0) { WC.toast('Rol film kamu sudah habis.'); return; }
     if (!state.stream) { WC.toast('Kamera belum siap.'); return; }
     const mime = pickVideoMime();
+    // Rekam lewat filter: gambar kamera diolah dulu, hasil olahannya yang direkam (suara tetap dari mikrofon)
+    let recStream = state.stream;
+    const vfx = WCFilm.createVideoFilter(el.video, { filter: state.filter, stamp: state.settings.dateStamp });
+    if (vfx) {
+      const tracks = vfx.stream.getVideoTracks().concat(state.stream.getAudioTracks());
+      recStream = new MediaStream(tracks);
+      vfx.canvas.className = 'vf-canvas' + (state.mirror ? ' mirror' : '');
+      el.video.parentNode.insertBefore(vfx.canvas, el.video.nextSibling);    // tampilkan hasil filter yang sebenarnya selama merekam
+      vfx.start();
+      state.vfx = vfx;
+    }
+    const endVfx = function () { if (state.vfx) { state.vfx.stop(); state.vfx.canvas.remove(); state.vfx = null; } };
     let rec;
-    try { rec = new MediaRecorder(state.stream, mime ? { mimeType: mime, videoBitsPerSecond: 4000000 } : undefined); }
-    catch (e) { WC.toast('HP ini belum bisa merekam video dari browser.'); return; }
+    try { rec = new MediaRecorder(recStream, mime ? { mimeType: mime, videoBitsPerSecond: 4000000 } : undefined); }
+    catch (e) { endVfx(); WC.toast('HP ini belum bisa merekam video dari browser.'); return; }
     const chunks = [];
     rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
     rec.onstop = function () {
@@ -293,10 +307,15 @@
       const blob = new Blob(chunks, { type: type });
       if (blob.size > 0) {
         let poster = Promise.resolve(null);      // ambil satu bingkai sebagai sampul video di album
-        try { const v = el.video; if (v.videoWidth) poster = WCFilm.thumbBlob(WCFilm.frameToCanvas(v, v.videoWidth, v.videoHeight, {})); } catch (e) { /* tanpa sampul */ }
+        try {
+          if (state.vfx) poster = WCFilm.thumbBlob(state.vfx.canvas);          // sudah berfilter
+          else { const v = el.video; if (v.videoWidth) poster = WCFilm.thumbBlob(WCFilm.frameToCanvas(v, v.videoWidth, v.videoHeight, {})); }
+        } catch (e) { /* tanpa sampul */ }
+        endVfx();
         poster.then(function (t) { return enqueue(blob, 'video', t); }, function () { return enqueue(blob, 'video'); })
           .then(function () { WC.toast('Video tersimpan di rol.'); });
       }
+      endVfx();
       updateCounter();
     };
     state.recorder = rec; state.recStart = Date.now();
