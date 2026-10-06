@@ -4,3 +4,12 @@
 12:08:56 PM	Info	Spreadsheet  : https://docs.google.com/spreadsheets/d/1TSuRfBXX3LPbVEygNVNGfbaDUQJfMl3-cJhgxWbpZd4/edit
 12:08:56 PM	Info	Sekarang: Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone)
 12:08:59 PM	Notice	Execution completed
+
+
+
+Version 1 on Oct 6, 2026, 12:12 PM
+Deployment ID
+AKfycbxa4-U8zelv-rPvTip2XEG4zp-gKjVrKsgjmgz2aG6CpdelFhAv8-5EsoijGKiWnPMR
+Web app
+URL
+https://script.google.com/macros/s/AKfycbxa4-U8zelv-rPvTip2XEG4zp-gKjVrKsgjmgz2aG6CpdelFhAv8-5EsoijGKiWnPMR/exec
