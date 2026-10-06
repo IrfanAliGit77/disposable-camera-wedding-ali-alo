@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Kamera Ali &amp; Alo</title>
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+    <!-- ============ LOGIN ============ -->
+    <main class="page" id="a-login">
+        <form class="login card" id="a-login-form">
+            <p class="label">Khusus Mempelai</p>
+            <h1 class="title" style="font-size:2.4rem">Dashboard</h1>
+            <div class="ornament"></div>
+            <label class="field"><span>PIN Admin</span><input type="password" id="a-pin" autocomplete="current-password" required></label>
+            <button class="btn block" type="submit" id="a-login-btn">Masuk</button>
+            <p class="notice error" id="a-login-err" hidden></p>
+        </form>
+    </main>
+
+    <!-- ============ DASHBOARD ============ -->
+    <main class="page" id="a-dash" hidden>
+        <header class="page-head">
+            <p class="label">Dashboard Mempelai</p>
+            <h1 class="title" id="a-title">Ali &amp; Alo</h1>
+            <div class="ornament"></div>
+            <p class="row" style="justify-content:center">
+                <span class="pill" id="a-pill-cam">Kamera dibuka</span>
+                <span class="pill" id="a-pill-album">Album dibuka</span>
+            </p>
+        </header>
+
+        <section class="stats">
+            <div class="stat"><b id="s-photos">0</b><span>Foto</span></div>
+            <div class="stat"><b id="s-videos">0</b><span>Video</span></div>
+            <div class="stat"><b id="s-guests">0</b><span>Tamu</span></div>
+            <div class="stat"><b id="s-size">0</b><span>Ukuran</span></div>
+        </section>
+
+        <section class="panel card">
+            <h2>Kendali Cepat</h2>
+            <p class="sub">Buka kamera saat acara dimulai, tutup saat selesai. Album bisa dibuka kapan saja.</p>
+            <div class="row">
+                <button class="btn small" type="button" id="a-toggle-cam">Tutup Kamera</button>
+                <button class="btn small gold" type="button" id="a-toggle-album">Buka Album Sekarang</button>
+                <button class="btn small ghost" type="button" id="a-reload">Muat Ulang</button>
+                <a class="btn small ghost" id="a-drive" href="#" target="_blank" rel="noopener">Folder Drive (unduh semua)</a>
+                <a class="btn small ghost" id="a-sheet" href="#" target="_blank" rel="noopener">Data Sheet</a>
+                <a class="btn small ghost" id="a-ss" href="gallery.html?slideshow=1" target="_blank" rel="noopener">Slideshow Layar Besar</a>
+                <button class="btn small danger" type="button" id="a-logout">Keluar</button>
+            </div>
+        </section>
+
+        <section class="panel card">
+            <h2>QR untuk Tamu</h2>
+            <p class="sub">Cetak dan letakkan di meja tamu, atau bagikan link-nya di grup.</p>
+            <div class="qr-card card" id="qr-print">
+                <p class="label">Scan &amp; Jepret</p>
+                <h3 class="title" style="font-size:2.2rem" id="qr-title">Ali &amp; Alo</h3>
+                <div class="qr" id="a-qr"></div>
+                <p class="lead" style="font-size:1rem">Arahkan kamera HP ke kode ini, lalu abadikan momen kami dari sudut pandangmu.</p>
+                <p class="qr-url" id="a-qr-url"></p>
+            </div>
+            <div class="row" style="justify-content:center;margin-top:1rem">
+                <button class="btn small" type="button" id="a-print">Cetak Kartu QR</button>
+                <button class="btn small ghost" type="button" id="a-copy">Salin Link</button>
+            </div>
+        </section>
+
+        <section class="panel card">
+            <h2>Pengaturan</h2>
+            <p class="sub">Perubahan langsung berlaku untuk semua tamu.</p>
+            <form id="a-settings">
+                <div class="cols">
+                    <label class="field"><span>Judul acara</span><input type="text" name="eventTitle" maxlength="60"></label>
+                    <label class="field"><span>Sub judul</span><input type="text" name="eventSubtitle" maxlength="80"></label>
+                    <label class="field"><span>Jatah jepretan per tamu</span><input type="number" name="shotsPerGuest" min="1" max="999"></label>
+                    <label class="field"><span>Durasi video maksimal (detik)</span><input type="number" name="maxVideoSeconds" min="3" max="120"></label>
+                    <label class="field"><span>Mode album</span>
+                        <select name="albumMode">
+                            <option value="reveal">Dibuka pada waktu tertentu (kejutan)</option>
+                            <option value="live">Langsung terlihat (live)</option>
+                        </select>
+                    </label>
+                    <label class="field"><span>Waktu album dibuka</span><input type="datetime-local" name="revealAt"></label>
+                </div>
+                <label class="check"><input type="checkbox" name="allowVideo"><span>Tamu boleh merekam video</span></label>
+                <label class="check"><input type="checkbox" name="allowLibrary"><span>Tamu boleh upload foto/video dari galeri HP (ukuran bebas, tidak memotong jatah jepretan)</span></label>
+                <label class="check"><input type="checkbox" name="guestsSeeOwn"><span>Sebelum album dibuka, tamu boleh melihat jepretannya sendiri</span></label>
+                <label class="check"><input type="checkbox" name="dateStamp"><span>Cap tanggal oranye di pojok foto</span></label>
+                <button class="btn" type="submit" id="a-save">Simpan Pengaturan</button>
+            </form>
+        </section>
+
+        <section class="panel card">
+            <h2>Jepretan per Tamu</h2>
+            <p class="sub">Siapa yang paling rajin memotret.</p>
+            <ul class="guest-list" id="a-guests"></ul>
+        </section>
+
+        <section class="panel">
+            <h2 style="text-align:center">Semua Kiriman</h2>
+            <p class="sub" style="text-align:center">Sembunyikan foto yang kurang pas, atau hapus permanen (file di Drive masuk ke Sampah).</p>
+            <div class="tabs" id="a-tabs">
+                <button type="button" data-f="all" class="active">Semua</button>
+                <button type="button" data-f="photo">Foto</button>
+                <button type="button" data-f="video">Video</button>
+                <button type="button" data-f="hidden">Tersembunyi</button>
+            </div>
+            <div class="grid" id="a-grid"></div>
+            <p class="empty" id="a-empty" hidden>Belum ada kiriman.</p>
+        </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    <script src="assets/js/config.js"></script>
+    <script src="assets/js/common.js"></script>
+    <script src="assets/js/admin.js"></script>
+</body>
+</html>

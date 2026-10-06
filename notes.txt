@@ -1,0 +1,6 @@
+12:08:54 PM	Notice	Execution started
+12:08:56 PM	Info	SETUP SELESAI
+12:08:56 PM	Info	Folder Drive : https://drive.google.com/drive/folders/11IdcHr6E1eTDDSLKa6MvYM6sMg-uJD86
+12:08:56 PM	Info	Spreadsheet  : https://docs.google.com/spreadsheets/d/1TSuRfBXX3LPbVEygNVNGfbaDUQJfMl3-cJhgxWbpZd4/edit
+12:08:56 PM	Info	Sekarang: Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone)
+12:08:59 PM	Notice	Execution completed

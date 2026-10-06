@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Kamera Disposable — Ali &amp; Alo</title>
+    <meta name="description" content="Abadikan momen pernikahan Ali & Alo lewat kamera disposable digital.">
+    <meta property="og:title" content="Kamera Disposable — Ali & Alo">
+    <meta property="og:description" content="Jepret momen favoritmu di hari bahagia kami.">
+    <meta name="theme-color" content="#282a25">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+    <!-- ============ SAMBUTAN ============ -->
+    <main class="welcome" id="welcome">
+        <div class="welcome-inner">
+            <div class="arch" aria-hidden="true">
+                <svg class="ic" viewBox="0 0 24 24"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2.2l1.2-2h8.2l1.2 2h2.2A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.6"/><path d="M17.5 10h.01"/></svg>
+            </div>
+            <p class="label" id="w-sub">The Wedding Disposable Camera</p>
+            <h1 class="title" id="w-title">Ali &amp; Alo</h1>
+            <div class="ornament"></div>
+            <p class="lead">Bantu kami menyimpan hari ini dari sudut pandangmu. Jepret sesukamu, biarkan hasilnya jadi kejutan.</p>
+
+            <ol class="steps">
+                <li><span>Tulis namamu, lalu izinkan akses kamera.</span></li>
+                <li><span>Kamu punya <b id="w-shots">27</b> jepretan, seperti satu rol film.</span></li>
+                <li><span id="w-reveal">Semua foto akan "dicuci" dan dibuka bersama di album.</span></li>
+            </ol>
+
+            <div class="notice error" id="w-error" hidden></div>
+            <div class="notice" id="w-closed" hidden>Kamera sedang ditutup oleh mempelai. Kamu tetap bisa melihat album.</div>
+
+            <form id="w-form" autocomplete="off">
+                <label class="field">
+                    <span>Nama kamu</span>
+                    <input type="text" id="w-name" maxlength="40" placeholder="contoh: Dinda &amp; Raka" required>
+                </label>
+                <button class="btn block" type="submit" id="w-start">Mulai Memotret</button>
+            </form>
+
+            <p class="welcome-links">
+                <a href="gallery.html">Lihat Album</a>
+                <a href="#" id="w-invite" hidden>Undangan</a>
+            </p>
+        </div>
+    </main>
+
+    <!-- ============ KAMERA ============ -->
+    <section class="cam" id="cam" hidden>
+        <div class="cam-top">
+            <span class="counter" id="c-counter" aria-live="polite">27<small>SISA</small></span>
+            <span class="cam-brand" id="c-brand">Ali &amp; Alo</span>
+            <a class="icon-btn" href="gallery.html" aria-label="Lihat album" title="Album">
+                <svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="14" height="14" rx="1.5"/><path d="M7 3h12.5A1.5 1.5 0 0 1 21 4.5V17"/><path d="m3 15 4-4 4 4 2-2 4 4"/></svg>
+            </a>
+        </div>
+
+        <div class="cam-stage">
+            <div class="viewfinder" id="vf">
+                <video id="c-video" playsinline autoplay muted></video>
+                <span class="vf-corner tl"></span><span class="vf-corner tr"></span><span class="vf-corner bl"></span><span class="vf-corner br"></span>
+                <span class="vf-stamp" id="c-stamp"></span>
+                <span class="vf-rec" id="c-rec" hidden><i></i><span id="c-rec-time">0:00</span></span>
+                <img class="vf-last" id="c-last" alt="">
+                <div class="vf-flash" id="c-flash"></div>
+                <div class="vf-shutter" id="c-shut"></div>
+                <div class="vf-msg" id="c-msg" hidden>
+                    <p id="c-msg-text"></p>
+                    <button class="btn gold" type="button" id="c-native">Buka Kamera HP</button>
+                    <button class="btn ghost small" type="button" id="c-retry" style="color:var(--cream);border-color:rgba(240,232,219,.4)">Coba Lagi</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="cam-status" id="c-status"></div>
+
+        <div class="cam-modes" id="c-modes">
+            <button type="button" data-mode="photo" class="active">Foto</button>
+            <button type="button" data-mode="video" id="c-mode-video">Video</button>
+        </div>
+
+        <div class="cam-controls">
+            <div class="side">
+                <button class="icon-btn" type="button" id="c-flash-btn" aria-label="Flash" aria-pressed="false" title="Flash">
+                    <svg class="ic" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+                </button>
+                <button class="icon-btn" type="button" id="c-lib-btn" aria-label="Upload dari galeri HP" title="Upload dari galeri">
+                    <svg class="ic" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+                </button>
+            </div>
+            <button class="shutter" type="button" id="c-shutter" aria-label="Jepret">
+                <svg class="ring" viewBox="0 0 84 84" aria-hidden="true"><circle cx="42" cy="42" r="39" id="c-ring"/></svg>
+            </button>
+            <div class="side right">
+                <button class="icon-btn" type="button" id="c-switch" aria-label="Ganti kamera depan/belakang" title="Ganti kamera">
+                    <svg class="ic" viewBox="0 0 24 24"><path d="M20 7h-3l-1.5-2h-7L7 7H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1z"/><path d="M9 12a3 3 0 0 1 5.2-2"/><path d="M15 14a3 3 0 0 1-5.2 2"/><path d="m14.5 8.3.2 2-2 .2"/><path d="m9.5 17.7-.2-2 2-.2"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <input type="file" id="c-native-input" accept="image/*" capture="environment" hidden>
+        <input type="file" id="c-lib-input" accept="image/*,video/*" multiple hidden>
+    </section>
+    <div class="screen-flash" id="screen-flash"></div>
+
+    <script src="assets/js/config.js"></script>
+    <script src="assets/js/common.js"></script>
+    <script src="assets/js/film.js"></script>
+    <script src="assets/js/camera.js"></script>
+</body>
+</html>

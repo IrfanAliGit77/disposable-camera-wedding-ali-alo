@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Album — Ali &amp; Alo</title>
+    <meta name="description" content="Album kamera disposable pernikahan Ali & Alo.">
+    <meta name="theme-color" content="#FAF6F0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+    <main class="page">
+        <header class="page-head">
+            <p class="label">Album Bersama</p>
+            <h1 class="title" id="g-title">Ali &amp; Alo</h1>
+            <div class="ornament"></div>
+            <p class="lead" id="g-lead">Memuat album…</p>
+        </header>
+
+        <nav class="topnav">
+            <a class="btn small" href="index.html">Buka Kamera</a>
+            <button class="btn small ghost" type="button" id="g-slideshow" hidden>Slideshow</button>
+            <button class="btn small ghost" type="button" id="g-refresh">Muat Ulang</button>
+        </nav>
+
+        <!-- Sebelum album dibuka -->
+        <section class="develop card" id="g-develop" hidden>
+            <p class="label">Sedang Dicuci</p>
+            <p class="lead" style="margin-top:.8rem">Film masih di kamar gelap. Album dibuka dalam:</p>
+            <div class="countdown" id="g-count">
+                <div><b id="cd-d">00</b><span>Hari</span></div>
+                <div><b id="cd-h">00</b><span>Jam</span></div>
+                <div><b id="cd-m">00</b><span>Menit</span></div>
+                <div><b id="cd-s">00</b><span>Detik</span></div>
+            </div>
+            <p class="muted" id="g-total"></p>
+        </section>
+
+        <div class="tabs" id="g-tabs" hidden>
+            <button type="button" data-f="all" class="active">Semua</button>
+            <button type="button" data-f="photo">Foto</button>
+            <button type="button" data-f="video">Video</button>
+            <button type="button" data-f="mine">Jepretanku</button>
+        </div>
+
+        <div class="grid" id="g-grid"></div>
+        <p class="empty" id="g-empty" hidden></p>
+    </main>
+
+    <!-- Lightbox -->
+    <div class="lightbox" id="lb" role="dialog" aria-modal="true" aria-label="Lihat foto">
+        <button class="icon-btn lb-close" type="button" id="lb-close" aria-label="Tutup"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        <button class="icon-btn lb-nav prev" type="button" id="lb-prev" aria-label="Sebelumnya"><svg class="ic" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button>
+        <button class="icon-btn lb-nav next" type="button" id="lb-next" aria-label="Berikutnya"><svg class="ic" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></button>
+        <div class="lb-stage" id="lb-stage"></div>
+        <div class="lb-bar">
+            <div class="lb-meta"><b id="lb-who"></b><span id="lb-when"></span></div>
+            <div class="lb-actions">
+                <a class="icon-btn" id="lb-dl" href="#" target="_blank" rel="noopener" aria-label="Unduh file asli" title="Unduh"><svg class="ic" viewBox="0 0 24 24"><path d="M12 4v12"/><path d="m7 11 5 5 5-5"/><path d="M4 20h16"/></svg></a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Slideshow -->
+    <div class="slideshow" id="ss">
+        <img id="ss-a" alt=""><img id="ss-b" alt="">
+        <div class="ss-cap"><b id="ss-who"></b><span id="ss-brand">Ali &amp; Alo</span></div>
+        <button class="icon-btn ss-exit" type="button" id="ss-exit" aria-label="Keluar slideshow"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+
+    <script src="assets/js/config.js"></script>
+    <script src="assets/js/common.js"></script>
+    <script src="assets/js/gallery.js"></script>
+</body>
+</html>
