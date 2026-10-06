@@ -272,3 +272,64 @@ svg.ic { width: 1.25em; height: 1.25em; fill: none; stroke: currentColor; stroke
   #qr-print { position: fixed; left: 50%; top: 8%; transform: translateX(-50%); box-shadow: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+
+/* ============================================================
+   v2 — SAMBUTAN DENGAN FOTO MEMPELAI, DAFTAR EVENT, PENYEMPURNAAN
+   ============================================================ */
+.welcome { position: relative; overflow: hidden; padding: 3rem 1.25rem 3.5rem; align-items: flex-start; }
+@media (min-height: 860px) { .welcome { align-items: center; } }
+.welcome-inner { position: relative; z-index: 1; max-width: 27rem; }
+.sprig { position: absolute; width: clamp(120px, 34vw, 220px); height: auto; color: var(--gold); opacity: 0.32; pointer-events: none; }
+.sprig.tl { top: 0.6rem; left: 0.2rem; }
+.sprig.br { bottom: 0.6rem; right: 0.2rem; transform: rotate(180deg); }
+
+/* foto mempelai: lingkaran dengan cincin emas (senada bagian Mempelai di undangan) */
+.portrait { position: relative; width: 210px; height: 210px; margin: 2.4rem auto 2.4rem; }
+.portrait-photo {
+  position: relative; z-index: 1; width: 100%; height: 100%; border-radius: 50%; overflow: hidden;
+  border: 5px solid var(--white); box-shadow: 0 18px 40px rgba(58,58,58,0.18);
+  background: linear-gradient(160deg, var(--sage-dark), var(--sage)); color: var(--cream);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); font-style: italic; font-weight: 300; font-size: 2.6rem; letter-spacing: 0.02em;
+}
+.portrait-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.8s ease; }
+.portrait-photo img.ready { opacity: 1; }
+.portrait::before { content: ''; position: absolute; inset: -12px; border-radius: 50%; border: 1px solid var(--gold); }
+.portrait::after { content: ''; position: absolute; inset: -24px; border-radius: 50%; border: 1px dashed rgba(201,169,110,0.55); animation: ringSpin 60s linear infinite; }
+@keyframes ringSpin { to { transform: rotate(360deg); } }
+.gem { position: absolute; left: 50%; z-index: 2; width: 9px; height: 9px; background: var(--gold); transform: translateX(-50%) rotate(45deg); box-shadow: 0 0 0 4px var(--cream); }
+.gem.top { top: -17px; } .gem.bottom { bottom: -17px; }
+.portrait.small { width: 96px; height: 96px; margin: 0.6rem auto 1.6rem; }
+.portrait.small .portrait-photo { border-width: 3px; font-size: 1.3rem; }
+.portrait.small::before { inset: -8px; } .portrait.small::after { inset: -16px; }
+.portrait.small .gem { width: 7px; height: 7px; } .portrait.small .gem.top { top: -12px; } .portrait.small .gem.bottom { bottom: -12px; }
+
+.date-line { font-family: var(--font-display); font-size: 1rem; letter-spacing: 0.42em; color: var(--sage-dark); text-align: center; margin-top: 0.5rem; padding-left: 0.42em; }
+.welcome .title { font-size: clamp(2.8rem, 12vw, 4rem); }
+.welcome .lead { font-size: 1.12rem; line-height: 1.75; }
+.welcome-card { margin-top: 2rem; padding: 1.9rem 1.5rem 1.7rem; text-align: left; }
+.welcome-card .steps { margin: 0 0 1.4rem; }
+.welcome-card .steps li:first-child { padding-top: 0; }
+.welcome-card .steps li:last-child { border-bottom: 0; }
+.welcome-foot { margin-top: 1.6rem; font-size: 0.62rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--sage); text-align: center; }
+
+/* tile "sedang dikirim" di album */
+.tile .sending { position: absolute; left: 0.5rem; top: 0.5rem; background: rgba(20,22,18,0.72); color: var(--gold-light); font-size: 0.56rem; letter-spacing: 0.18em; text-transform: uppercase; padding: 0.2rem 0.45rem; }
+.tile.is-new { animation: tileIn 0.7s ease both; }
+@keyframes tileIn { from { opacity: 0; transform: translateY(10px) scale(0.97); } to { opacity: 1; transform: none; } }
+.tile.is-video-blank { background: linear-gradient(160deg, var(--ink-2), var(--ink)); }
+.live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--sage); margin-right: 0.45rem; animation: blink 1.6s ease-in-out infinite; vertical-align: middle; }
+
+/* daftar event (admin) */
+.event-grid { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); margin-bottom: 1.6rem; }
+.event-card { text-align: left; padding: 1.5rem 1.4rem 1.3rem; border: 0; cursor: pointer; width: 100%; transition: transform 0.3s ease, box-shadow 0.3s ease; display: block; }
+.event-card:hover { transform: translateY(-3px); box-shadow: 0 16px 40px rgba(58,58,58,0.12); }
+.event-card h3 { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 1.6rem; line-height: 1.2; margin-bottom: 0.2rem; }
+.event-card .meta { font-size: 0.74rem; letter-spacing: 0.08em; color: var(--charcoal-light); margin-bottom: 0.8rem; }
+.event-card .big { font-family: var(--font-display); font-style: italic; font-size: 2rem; line-height: 1; color: var(--sage-dark); }
+.event-card .big small { font-family: var(--font-body); font-style: normal; font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--charcoal-light); margin-left: 0.4rem; }
+.cover-row { display: flex; align-items: center; gap: 1.6rem; flex-wrap: wrap; margin-bottom: 1.4rem; }
+.cover-row .portrait.small { margin: 1rem 1.2rem; flex: none; }
+.danger-zone { border-top: 1px solid var(--cream-dark); margin-top: 1.6rem; padding-top: 1.2rem; }
+.backlink { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.68rem; letter-spacing: 0.2em; text-transform: uppercase; text-decoration: none; background: none; border: 0; color: var(--sage-dark); margin-bottom: 1rem; }
+code.kbd { font-family: 'Courier New', monospace; background: var(--cream-dark); padding: 0.1rem 0.4rem; font-size: 0.85em; }

@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Album — Ali &amp; Alo</title>
-    <meta name="description" content="Album kamera disposable pernikahan Ali & Alo.">
+    <title>Album</title>
+    <meta name="description" content="Album kamera disposable.">
     <meta name="theme-color" content="#FAF6F0">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,13 +15,19 @@
     <main class="page">
         <header class="page-head">
             <p class="label">Album Bersama</p>
-            <h1 class="title" id="g-title">Ali &amp; Alo</h1>
+            <div class="portrait small" id="g-portrait" hidden>
+                <span class="gem top"></span>
+                <div class="portrait-photo"><img id="g-photo" alt=""></div>
+                <span class="gem bottom"></span>
+            </div>
+            <h1 class="title" id="g-title">&nbsp;</h1>
+            <p class="date-line" id="g-date"></p>
             <div class="ornament"></div>
             <p class="lead" id="g-lead">Memuat album…</p>
         </header>
 
         <nav class="topnav">
-            <a class="btn small" href="index.html">Buka Kamera</a>
+            <a class="btn small" href="index.html" id="g-cam">Buka Kamera</a>
             <button class="btn small ghost" type="button" id="g-slideshow" hidden>Slideshow</button>
             <button class="btn small ghost" type="button" id="g-refresh">Muat Ulang</button>
         </nav>
@@ -67,7 +73,7 @@
     <!-- Slideshow -->
     <div class="slideshow" id="ss">
         <img id="ss-a" alt=""><img id="ss-b" alt="">
-        <div class="ss-cap"><b id="ss-who"></b><span id="ss-brand">Ali &amp; Alo</span></div>
+        <div class="ss-cap"><b id="ss-who"></b><span id="ss-brand"></span></div>
         <button class="icon-btn ss-exit" type="button" id="ss-exit" aria-label="Keluar slideshow"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
 

@@ -7,7 +7,7 @@
   const $ = WC.$;
   const el = {
     welcome: $('#welcome'), cam: $('#cam'), form: $('#w-form'), name: $('#w-name'), start: $('#w-start'),
-    wErr: $('#w-error'), wClosed: $('#w-closed'), wShots: $('#w-shots'), wReveal: $('#w-reveal'), wTitle: $('#w-title'), wSub: $('#w-sub'), wInvite: $('#w-invite'),
+    wErr: $('#w-error'), wClosed: $('#w-closed'), wShots: $('#w-shots'), wReveal: $('#w-reveal'), wTitle: $('#w-title'), wSub: $('#w-sub'), wInvite: $('#w-invite'), wDate: $('#w-date'), wPhoto: $('#w-photo'), wMono: $('#w-mono'), wAlbum: $('#w-album'), cAlbum: $('#c-album'),
     video: $('#c-video'), counter: $('#c-counter'), brand: $('#c-brand'), stamp: $('#c-stamp'),
     rec: $('#c-rec'), recTime: $('#c-rec-time'), last: $('#c-last'), flash: $('#c-flash'), shut: $('#c-shut'),
     msg: $('#c-msg'), msgText: $('#c-msg-text'), native: $('#c-native'), retry: $('#c-retry'),
@@ -18,17 +18,26 @@
 
   const state = {
     settings: { shotsPerGuest: 27, allowVideo: true, maxVideoSeconds: 15, allowLibrary: true, cameraOpen: true, dateStamp: true, guestsSeeOwn: true },
-    used: 0, pending: 0, stream: null, facing: 'environment', mode: 'photo', flashOn: false,
-    busy: false, recorder: null, recTimer: null, recStart: 0, uploading: false, libActive: 0, lastUrl: null
+    used: 0, stream: null, cover: '', facing: 'environment', mode: 'photo', flashOn: false,
+    busy: false, recorder: null, recTimer: null, recStart: 0, libActive: 0, lastUrl: null, ready: false
   };
 
   /* ---------- sambutan ---------- */
   function applySettings(s) {
     state.settings = Object.assign(state.settings, s || {});
     const st = state.settings;
-    const title = st.eventTitle || C.TITLE || 'Ali & Alo';
-    el.wTitle.textContent = title; el.brand.textContent = title;
-    el.wSub.textContent = st.eventSubtitle || C.SUBTITLE || '';
+    const title = st.eventTitle || '';
+    if (title) {
+      el.wTitle.textContent = title; el.brand.textContent = title;
+      el.wMono.textContent = WC.initials(title);
+      document.title = 'Kamera Disposable — ' + title;
+    }
+    if (st.eventSubtitle) el.wSub.textContent = st.eventSubtitle;
+    el.wDate.textContent = WC.fmtDateLine(st.eventDate);
+    if (st.coverFileId && st.coverFileId !== state.cover) {       // foto mempelai di lingkaran
+      state.cover = st.coverFileId;
+      WC.loadThumb(el.wPhoto, st.coverFileId, 600);
+    }
     el.wShots.textContent = st.shotsPerGuest;
     if (st.albumMode === 'live') el.wReveal.textContent = 'Hasil jepretanmu langsung masuk ke album bersama.';
     else {
@@ -37,7 +46,7 @@
         : 'Semua foto "dicuci" dulu dan dibuka bersama pada ' + t.toLocaleString('id-ID', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) + '.';
     }
     el.wClosed.hidden = !!st.cameraOpen;
-    el.start.disabled = !st.cameraOpen;
+    el.start.disabled = !st.cameraOpen || !state.ready;
     el.modeVideo.hidden = !st.allowVideo || typeof MediaRecorder === 'undefined';
     el.libBtn.hidden = !st.allowLibrary;
     el.stamp.textContent = st.dateStamp ? WCFilm.dateText() : '';
@@ -45,15 +54,23 @@
   }
 
   async function loadConfig() {
+    if (!WC.event) {
+      el.wErr.hidden = false; el.form.hidden = true;
+      el.wErr.textContent = 'Link belum lengkap. Silakan scan ulang kode QR dari mempelai.';
+      return;
+    }
     try {
       const r = await WC.api('config');
-      state.used = r.used || 0;
+      state.used = r.used || 0; state.ready = true;
       applySettings(r.settings);
       el.wErr.hidden = true;
+      WC.prewarm();                       // siapkan tiket upload dari sekarang
     } catch (e) {
       el.wErr.hidden = false;
+      if (e.code === 'NO_EVENT') { el.form.hidden = true; el.wErr.textContent = e.message; return; }
       el.wErr.textContent = e.code === 'CONFIG' ? 'Aplikasi belum tersambung ke server: ' + e.message
-        : 'Belum bisa menghubungi server (' + e.message + '). Kamu tetap bisa memotret; foto akan dikirim saat tersambung.';
+        : 'Belum bisa menghubungi server (' + e.message + '). Coba muat ulang halaman.';
+      setTimeout(loadConfig, 6000);
     }
   }
 
@@ -65,7 +82,8 @@
     el.welcome.hidden = true; el.cam.hidden = false;
     unlockAudio();
     startCamera();
-    refreshPending().then(processQueue);
+    WC.prewarm();
+    updateCounter(); updateStatus();
   });
 
   /* ---------- kamera ---------- */
@@ -124,20 +142,17 @@
   });
 
   /* ---------- hitungan sisa film ---------- */
-  function remaining() { return Math.max(0, Number(state.settings.shotsPerGuest) - state.used - state.pending); }
+  function pending() { return WC.queue.pending(WC.event, 'camera'); }
+  function remaining() { return Math.max(0, Number(state.settings.shotsPerGuest) - state.used - pending()); }
   function updateCounter() {
     const r = remaining();
     el.counter.innerHTML = String(r).padStart(2, '0') + '<small>SISA</small>';
     if (!state.recorder) el.shutter.disabled = r <= 0;
   }
-  async function refreshPending() {
-    const all = await WC.queue.all();
-    state.pending = all.filter(function (i) { return i.meta && i.meta.source === 'camera'; }).length;
-    updateCounter(); updateStatus();
-  }
   function updateStatus(progress) {
     const parts = [];
-    if (state.pending > 0) parts.push(state.pending + ' jepretan menunggu terkirim');
+    const p = pending();
+    if (p > 0) parts.push('mengirim ' + p + ' jepretan\u2026');
     if (state.libActive > 0) parts.push('mengirim ' + state.libActive + ' file dari galeri');
     if (!parts.length && remaining() <= 0) parts.push('Rol film habis. Terima kasih sudah mengabadikan momen kami!');
     let html = WC.esc(parts.join(' · '));
@@ -188,22 +203,23 @@
     state.busy = true;
     try {
       const flashOff = await fireFlashBefore();
-      const canvas = WCFilm.frameToCanvas(v, v.videoWidth, v.videoHeight, { mirror: state.mirror });
+      // Layar pratinjau kamera depan memang seperti cermin, tapi HASIL disimpan dengan arah sebenarnya
+      // (tulisan terbaca normal). Ubah MIRROR_SELFIE di config.js kalau mau hasil seperti cermin.
+      const canvas = WCFilm.frameToCanvas(v, v.videoWidth, v.videoHeight, { mirror: state.mirror && !!C.MIRROR_SELFIE });
       flashOff();
       clickSound(); animate(el.shut); if (state.flashOn) animate(el.flash);
       WCFilm.apply(canvas, { stamp: state.settings.dateStamp });
-      const blob = await WCFilm.toBlob(canvas, 0.9);
-      await enqueue(blob, 'photo');
+      const blob = await WCFilm.toBlob(canvas, 0.88);
+      await enqueue(blob, 'photo', await WCFilm.thumbBlob(canvas));
     } catch (e) { WC.toast('Gagal mengambil foto: ' + e.message); }
     state.busy = false;
   }
 
-  async function enqueue(blob, type) {
-    await WC.queue.add(blob, { source: 'camera', type: type, guest: WC.guestName() });
-    state.pending++;
+  async function enqueue(blob, type, thumb) {
+    const item = await WC.queue.add(blob, { event: WC.event, source: 'camera', type: type, guest: WC.guestName() });
+    WC.thumbs.add(item.id, WC.event, thumb || null, type);       // salinan kecil: langsung tampil di album
     updateCounter(); updateStatus();
-    if (type === 'photo' && state.settings.guestsSeeOwn) showLast(blob);
-    processQueue();
+    if (type === 'photo' && state.settings.guestsSeeOwn) showLast(thumb || blob);
   }
   function showLast(blob) {
     if (state.lastUrl) URL.revokeObjectURL(state.lastUrl);
@@ -233,7 +249,12 @@
       el.rec.hidden = true; el.shutter.classList.remove('recording'); el.ring.style.strokeDashoffset = 245;
       const type = (rec.mimeType || mime || 'video/webm').split(';')[0];
       const blob = new Blob(chunks, { type: type });
-      if (blob.size > 0) enqueue(blob, 'video').then(function () { WC.toast('Video tersimpan di rol.'); });
+      if (blob.size > 0) {
+        let poster = Promise.resolve(null);      // ambil satu bingkai sebagai sampul video di album
+        try { const v = el.video; if (v.videoWidth) poster = WCFilm.thumbBlob(WCFilm.frameToCanvas(v, v.videoWidth, v.videoHeight, {})); } catch (e) { /* tanpa sampul */ }
+        poster.then(function (t) { return enqueue(blob, 'video', t); }, function () { return enqueue(blob, 'video'); })
+          .then(function () { WC.toast('Video tersimpan di rol.'); });
+      }
       updateCounter();
     };
     state.recorder = rec; state.recStart = Date.now();
@@ -266,9 +287,9 @@
       const img = await loadImage(f);
       const canvas = WCFilm.frameToCanvas(img, img.naturalWidth || img.width, img.naturalHeight || img.height, {});
       WCFilm.apply(canvas, { stamp: state.settings.dateStamp });
-      const blob = await WCFilm.toBlob(canvas, 0.9);
+      const blob = await WCFilm.toBlob(canvas, 0.88);
       clickSound();
-      await enqueue(blob, 'photo');
+      await enqueue(blob, 'photo', await WCFilm.thumbBlob(canvas));
       WC.toast('Foto tersimpan di rol.');
     } catch (e) { WC.toast('Foto tidak bisa diproses: ' + e.message); }
   });
@@ -293,7 +314,7 @@
       const f = files[i];
       try {
         const type = (f.type || '').indexOf('video/') === 0 ? 'video' : 'photo';
-        await WC.upload(f, { source: 'library', type: type }, function (p) { updateStatus(p); });
+        await WC.upload(f, { event: WC.event, source: 'library', type: type }, function (p) { updateStatus(p); });
         okCount++;
       } catch (e) { WC.toast('Gagal mengirim ' + f.name + ': ' + e.message, 4000); }
       state.libActive--; updateStatus();
@@ -301,38 +322,20 @@
     if (okCount) WC.toast(okCount + ' file dari galeri terkirim. Terima kasih!');
   });
 
-  /* ---------- kirim antrean jepretan ---------- */
-  async function processQueue() {
-    if (state.uploading) return;
-    state.uploading = true;
-    try {
-      let items = await WC.queue.all();
-      while (items.length) {
-        const item = items[0];
-        try {
-          const r = await WC.upload(item.blob, item.meta, function (p) { updateStatus(p); });
-          await WC.queue.remove(item.id);
-          if (typeof r.used === 'number') state.used = r.used;
-        } catch (e) {
-          if (e.code === 'LIMIT' || e.code === 'CLOSED' || e.code === 'NOT_ALLOWED' || e.code === 'BAD_REQUEST') {
-            await WC.queue.remove(item.id);        // ditolak server: buang supaya tidak mengulang selamanya
-            WC.toast(e.message, 4000);
-            if (e.code === 'LIMIT') state.used = Number(state.settings.shotsPerGuest);
-          } else {
-            await refreshPending();
-            setTimeout(processQueue, 15000);       // sinyal jelek: coba lagi nanti
-            return;
-          }
-        }
-        await refreshPending();
-        items = await WC.queue.all();
-      }
-    } finally { state.uploading = false; }
-  }
-  window.addEventListener('online', processQueue);
+  /* ---------- antrean kirim (jalan di latar, 3 sekaligus; lihat common.js) ---------- */
+  WC.queue.on(function (type, item, extra) {
+    if (item.meta.event !== WC.event) return;
+    if (type === 'done' && extra && typeof extra.used === 'number') state.used = Math.max(state.used, extra.used);
+    if (type === 'rejected') {
+      WC.toast(extra.message, 4000);
+      if (extra.code === 'LIMIT') state.used = Number(state.settings.shotsPerGuest);
+      if (extra.code === 'CLOSED') { state.settings.cameraOpen = false; }
+    }
+    updateCounter(); updateStatus();
+  });
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) { if (state.recorder) stopRecording(); }
-    else if (!el.cam.hidden) { if (!state.stream || !state.stream.active) startCamera(); processQueue(); }
+    else if (!el.cam.hidden && (!state.stream || !state.stream.active)) startCamera();
   });
   window.addEventListener('beforeunload', function (e) {
     if (state.libActive > 0) { e.preventDefault(); e.returnValue = ''; }
@@ -341,7 +344,9 @@
   /* ---------- mulai ---------- */
   el.name.value = WC.guestName();
   if (C.INVITATION_URL) { el.wInvite.hidden = false; el.wInvite.href = C.INVITATION_URL; }
+  el.wAlbum.href = WC.link('gallery.html'); el.cAlbum.href = WC.link('gallery.html');
   applySettings({});
   loadConfig();
-  refreshPending().then(processQueue);   // lanjutkan kiriman yang tertunda dari kunjungan sebelumnya
+  WC.queue.primary = true;
+  WC.queue.load().then(function () { updateCounter(); updateStatus(); WC.queue.pump(); });   // lanjutkan kiriman tertunda
 })();

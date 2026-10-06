@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard — Kamera Ali &amp; Alo</title>
+    <title>Dashboard — Disposable Camera</title>
     <meta name="robots" content="noindex, nofollow">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
     <!-- ============ LOGIN ============ -->
     <main class="page" id="a-login">
         <form class="login card" id="a-login-form">
-            <p class="label">Khusus Mempelai</p>
+            <p class="label" id="a-login-label">Khusus Admin</p>
             <h1 class="title" style="font-size:2.4rem">Dashboard</h1>
             <div class="ornament"></div>
             <label class="field"><span>PIN Admin</span><input type="password" id="a-pin" autocomplete="current-password" required></label>
@@ -23,11 +23,42 @@
         </form>
     </main>
 
-    <!-- ============ DASHBOARD ============ -->
-    <main class="page" id="a-dash" hidden>
+    <!-- ============ DAFTAR EVENT (PIN utama) ============ -->
+    <main class="page" id="a-events" hidden>
         <header class="page-head">
-            <p class="label">Dashboard Mempelai</p>
-            <h1 class="title" id="a-title">Ali &amp; Alo</h1>
+            <p class="label">Disposable Camera</p>
+            <h1 class="title">Semua Event</h1>
+            <div class="ornament"></div>
+            <p class="lead">Setiap event punya tab Sheet, folder Drive, link, dan QR sendiri.</p>
+        </header>
+
+        <section class="panel card">
+            <h2>Buat Event Baru</h2>
+            <p class="sub">Nama event dipakai sebagai nama tab di Sheet dan nama folder di Drive.</p>
+            <form id="e-form">
+                <div class="cols">
+                    <label class="field"><span>Nama event</span><input type="text" name="name" maxlength="60" placeholder="contoh: Ali &amp; Alo" required></label>
+                    <label class="field"><span>Tanggal acara</span><input type="date" name="eventDate"></label>
+                </div>
+                <div class="row">
+                    <button class="btn" type="submit" id="e-create">Buat Event</button>
+                    <a class="btn ghost small" id="e-sheet" href="#" target="_blank" rel="noopener">Buka Sheet Utama</a>
+                    <a class="btn ghost small" id="e-folder" href="#" target="_blank" rel="noopener">Buka Folder Induk</a>
+                    <button class="btn small danger" type="button" data-logout>Keluar</button>
+                </div>
+            </form>
+        </section>
+
+        <div class="event-grid" id="e-grid"></div>
+        <p class="empty" id="e-empty" hidden>Belum ada event. Buat yang pertama di atas.</p>
+    </main>
+
+    <!-- ============ DASHBOARD SATU EVENT ============ -->
+    <main class="page" id="a-dash" hidden>
+        <button class="backlink" type="button" id="a-back" hidden>&larr; Semua Event</button>
+        <header class="page-head">
+            <p class="label">Dashboard Event</p>
+            <h1 class="title" id="a-title">&nbsp;</h1>
             <div class="ornament"></div>
             <p class="row" style="justify-content:center">
                 <span class="pill" id="a-pill-cam">Kamera dibuka</span>
@@ -50,35 +81,54 @@
                 <button class="btn small gold" type="button" id="a-toggle-album">Buka Album Sekarang</button>
                 <button class="btn small ghost" type="button" id="a-reload">Muat Ulang</button>
                 <a class="btn small ghost" id="a-drive" href="#" target="_blank" rel="noopener">Folder Drive (unduh semua)</a>
-                <a class="btn small ghost" id="a-sheet" href="#" target="_blank" rel="noopener">Data Sheet</a>
-                <a class="btn small ghost" id="a-ss" href="gallery.html?slideshow=1" target="_blank" rel="noopener">Slideshow Layar Besar</a>
-                <button class="btn small danger" type="button" id="a-logout">Keluar</button>
+                <a class="btn small ghost" id="a-sheet" href="#" target="_blank" rel="noopener">Tab Sheet</a>
+                <a class="btn small ghost" id="a-ss" href="#" target="_blank" rel="noopener">Slideshow Layar Besar</a>
+                <a class="btn small ghost" id="a-album" href="#" target="_blank" rel="noopener">Lihat Album</a>
+                <button class="btn small danger" type="button" data-logout>Keluar</button>
             </div>
         </section>
 
         <section class="panel card">
             <h2>QR untuk Tamu</h2>
-            <p class="sub">Cetak dan letakkan di meja tamu, atau bagikan link-nya di grup.</p>
+            <p class="sub">QR dan link ini khusus untuk event ini. Cetak dan letakkan di meja tamu, atau bagikan link-nya.</p>
             <div class="qr-card card" id="qr-print">
                 <p class="label">Scan &amp; Jepret</p>
-                <h3 class="title" style="font-size:2.2rem" id="qr-title">Ali &amp; Alo</h3>
+                <h3 class="title" style="font-size:2.2rem" id="qr-title">&nbsp;</h3>
                 <div class="qr" id="a-qr"></div>
                 <p class="lead" style="font-size:1rem">Arahkan kamera HP ke kode ini, lalu abadikan momen kami dari sudut pandangmu.</p>
                 <p class="qr-url" id="a-qr-url"></p>
             </div>
             <div class="row" style="justify-content:center;margin-top:1rem">
                 <button class="btn small" type="button" id="a-print">Cetak Kartu QR</button>
-                <button class="btn small ghost" type="button" id="a-copy">Salin Link</button>
+                <button class="btn small ghost" type="button" id="a-copy">Salin Link Tamu</button>
+            </div>
+        </section>
+
+        <section class="panel card">
+            <h2>Foto Sampul</h2>
+            <p class="sub">Foto mempelai yang tampil di lingkaran pada halaman tamu. Pilih foto yang wajahnya di tengah.</p>
+            <div class="cover-row">
+                <div class="portrait small">
+                    <span class="gem top"></span>
+                    <div class="portrait-photo"><span id="a-cover-mono"></span><img id="a-cover-img" alt=""></div>
+                    <span class="gem bottom"></span>
+                </div>
+                <div class="row">
+                    <button class="btn small" type="button" id="a-cover-btn">Pilih Foto</button>
+                    <button class="btn small ghost" type="button" id="a-cover-del" hidden>Hapus Foto</button>
+                    <input type="file" id="a-cover-input" accept="image/*" hidden>
+                </div>
             </div>
         </section>
 
         <section class="panel card">
             <h2>Pengaturan</h2>
-            <p class="sub">Perubahan langsung berlaku untuk semua tamu.</p>
+            <p class="sub">Berlaku hanya untuk event ini, dan langsung aktif untuk semua tamunya.</p>
             <form id="a-settings">
                 <div class="cols">
-                    <label class="field"><span>Judul acara</span><input type="text" name="eventTitle" maxlength="60"></label>
+                    <label class="field" id="f-name"><span>Nama event (tab &amp; folder ikut berganti)</span><input type="text" name="name" maxlength="60"></label>
                     <label class="field"><span>Sub judul</span><input type="text" name="eventSubtitle" maxlength="80"></label>
+                    <label class="field"><span>Tanggal acara</span><input type="date" name="eventDate"></label>
                     <label class="field"><span>Jatah jepretan per tamu</span><input type="number" name="shotsPerGuest" min="1" max="999"></label>
                     <label class="field"><span>Durasi video maksimal (detik)</span><input type="number" name="maxVideoSeconds" min="3" max="120"></label>
                     <label class="field"><span>Mode album</span>
@@ -88,6 +138,7 @@
                         </select>
                     </label>
                     <label class="field"><span>Waktu album dibuka</span><input type="datetime-local" name="revealAt"></label>
+                    <label class="field" id="f-pin"><span>PIN klien (opsional, khusus event ini)</span><input type="text" name="clientPin" maxlength="40" autocomplete="off" placeholder="kosong = hanya PIN utama"></label>
                 </div>
                 <label class="check"><input type="checkbox" name="allowVideo"><span>Tamu boleh merekam video</span></label>
                 <label class="check"><input type="checkbox" name="allowLibrary"><span>Tamu boleh upload foto/video dari galeri HP (ukuran bebas, tidak memotong jatah jepretan)</span></label>
@@ -95,6 +146,11 @@
                 <label class="check"><input type="checkbox" name="dateStamp"><span>Cap tanggal oranye di pojok foto</span></label>
                 <button class="btn" type="submit" id="a-save">Simpan Pengaturan</button>
             </form>
+            <p class="muted" id="a-client-hint" style="margin-top:1rem" hidden></p>
+            <div class="danger-zone" id="a-danger" hidden>
+                <button class="btn small danger" type="button" id="a-delete-event">Hapus Event Ini</button>
+                <span class="muted">Tab Sheet dihapus dan folder Drive dipindah ke Sampah (bisa dipulihkan 30 hari).</span>
+            </div>
         </section>
 
         <section class="panel card">

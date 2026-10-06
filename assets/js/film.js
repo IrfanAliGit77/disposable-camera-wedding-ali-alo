@@ -36,6 +36,7 @@
     opts = opts || {};
     const w = canvas.width, h = canvas.height;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     // 1) warna + grain, piksel demi piksel
     const img = ctx.getImageData(0, 0, w, h);
@@ -104,7 +105,17 @@
     const ctx = c.getContext('2d', { willReadFrequently: true });
     if (opts.mirror) { ctx.translate(ow, 0); ctx.scale(-1, 1); }
     ctx.drawImage(source, sx, sy, cw, ch, 0, 0, ow, oh);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);   // kembalikan arah normal supaya cap tanggal & efek tidak ikut terbalik
     return c;
+  };
+
+  // Salinan kecil (untuk tampil instan di album)
+  Film.thumbBlob = function (canvas, width) {
+    const w = width || 360, h = Math.round(canvas.height * (w / canvas.width));
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(canvas, 0, 0, w, h);
+    return Film.toBlob(c, 0.72);
   };
 
   Film.toBlob = function (canvas, quality) {
