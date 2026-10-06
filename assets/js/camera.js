@@ -279,6 +279,7 @@
     for (let i = 0; i < list.length; i++) { try { if (MediaRecorder.isTypeSupported(list[i])) return list[i]; } catch (e) { /* lanjut */ } }
     return '';
   }
+  function clock(sec) { sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
   function startRecording() {
     if (remaining() <= 0) { WC.toast('Rol film kamu sudah habis.'); return; }
     if (!state.stream) { WC.toast('Kamera belum siap.'); return; }
@@ -296,7 +297,7 @@
     }
     const endVfx = function () { if (state.vfx) { state.vfx.stop(); state.vfx.canvas.remove(); state.vfx = null; } };
     let rec;
-    try { rec = new MediaRecorder(recStream, mime ? { mimeType: mime, videoBitsPerSecond: 4000000 } : undefined); }
+    try { rec = new MediaRecorder(recStream, mime ? { mimeType: mime, videoBitsPerSecond: 2500000, audioBitsPerSecond: 96000 } : undefined); }
     catch (e) { endVfx(); WC.toast('HP ini belum bisa merekam video dari browser.'); return; }
     const chunks = [];
     rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
@@ -323,7 +324,7 @@
     el.rec.hidden = false; el.shutter.classList.add('recording');
     state.recTimer = setInterval(function () {
       const sec = (Date.now() - state.recStart) / 1000;
-      el.recTime.textContent = '0:' + String(Math.floor(sec)).padStart(2, '0') + ' / 0:' + String(max).padStart(2, '0');
+      el.recTime.textContent = clock(sec) + ' / ' + clock(max);
       el.ring.style.strokeDashoffset = 245 * (1 - Math.min(1, sec / max));
       if (sec >= max) stopRecording();
     }, 100);

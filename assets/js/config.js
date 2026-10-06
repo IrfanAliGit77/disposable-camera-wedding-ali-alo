@@ -8,6 +8,7 @@ window.WC_CONFIG = {
   // Event yang dibuka kalau link tidak menyebut event (tanpa ?e=...).
   // Isi dengan KODE event dari dashboard, misalnya 'ali-dan-alo'. Boleh dikosongkan.
   DEFAULT_EVENT: '',
+  DRIVE_API_KEY: 'AIzaSyDDILf9D6lubcdvSiPhflXTcoiMNl0gNqI',
 
   // Foto selfie (kamera depan): false = disimpan apa adanya seperti kamera HP (tulisan terbaca normal),
   // true = disimpan seperti cermin (sama persis dengan yang terlihat di layar saat memotret).
