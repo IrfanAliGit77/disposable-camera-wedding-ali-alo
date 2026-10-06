@@ -13,3 +13,16 @@ AKfycbxa4-U8zelv-rPvTip2XEG4zp-gKjVrKsgjmgz2aG6CpdelFhAv8-5EsoijGKiWnPMR
 Web app
 URL
 https://script.google.com/macros/s/AKfycbxa4-U8zelv-rPvTip2XEG4zp-gKjVrKsgjmgz2aG6CpdelFhAv8-5EsoijGKiWnPMR/exec
+
+
+Deployment successfully updated.
+Version 2 on Oct 6, 2026, 1:59 PM
+Deployment ID
+AKfycbxa4-U8zelv-rPvTip2XEG4zp-gKjVrKsgjmgz2aG6CpdelFhAv8-5EsoijGKiWnPMR
+Web app
+URL
+https://script.google.com/macros/s/AKfycbxa4-U8zelv-rPvTip2XEG4zp-gKjVrKsgjmgz2aG6CpdelFhAv8-5EsoijGKiWnPMR/exec
+Library
+URL
+https://script.google.com/macros/library/d/1SrADcwhSaS7YcTgUNZ1WLHbiiXj4xf8JtxqDhHZlqBkfyDaTuHYxkSKZ/2
+To let other people and groups to use this project as a library, share this project with them.
