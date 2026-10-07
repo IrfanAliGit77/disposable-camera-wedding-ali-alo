@@ -45,6 +45,9 @@
     return v || '';
   };
 
+  const API_TIMEOUT = Number(C.API_TIMEOUT_MS) || 45000;
+  const STALL_MS = Number(C.STALL_MS) || 40000;      // upload dianggap macet kalau selama ini tidak ada kemajuan
+
   /* ---------- panggil backend Apps Script ---------- */
   WC.api = async function (action, data) {
     if (!C.API_URL || C.API_URL.indexOf('TEMPEL') === 0) {
@@ -52,12 +55,15 @@
     }
     const body = Object.assign({ action: action, deviceId: WC.deviceId, event: WC.event }, data || {});
     let res;
+    // Batas waktu: permintaan yang menggantung (sering terjadi saat HP dikunci/pindah aplikasi) dibatalkan, bukan ditunggu selamanya
+    const ctl = window.AbortController ? new AbortController() : null;
+    const timer = ctl ? setTimeout(function () { ctl.abort(); }, API_TIMEOUT) : null;
     try {
       // Sengaja tanpa header Content-Type: supaya jadi "simple request" dan lolos CORS Apps Script
-      res = await fetch(C.API_URL, { method: 'POST', body: JSON.stringify(body), redirect: 'follow' });
+      res = await fetch(C.API_URL, { method: 'POST', body: JSON.stringify(body), redirect: 'follow', signal: ctl ? ctl.signal : undefined });
     } catch (e) {
-      throw Object.assign(new Error('Tidak ada koneksi internet.'), { code: 'NETWORK' });
-    }
+      throw Object.assign(new Error(e && e.name === 'AbortError' ? 'Server terlalu lama menjawab.' : 'Tidak ada koneksi internet.'), { code: 'NETWORK' });
+    } finally { clearTimeout(timer); }
     let j;
     try { j = await res.json(); } catch (e) {
       throw Object.assign(new Error('Jawaban server tidak terbaca. Cek URL Web App & izin akses "Anyone".'), { code: 'NETWORK' });
@@ -136,30 +142,53 @@
   /* ============================================================
      UPLOAD LANGSUNG KE GOOGLE DRIVE (resumable, per potongan)
      ============================================================ */
-  const CHUNK = 8 * 1024 * 1024;   // harus kelipatan 256 KB
+  const CHUNK = 4 * 1024 * 1024;   // harus kelipatan 256 KB. Potongan kecil = kalau putus, yang diulang sedikit
 
   function xhrPut(url, body, range, onProgress) {
     return new Promise(function (resolve, reject) {
       const x = new XMLHttpRequest();
+      let dog = null, done = false;
+      const finish = function (fn, val) { if (done) return; done = true; clearTimeout(dog); fn(val); };
+      // "anjing penjaga": kalau tidak ada kemajuan selama STALL_MS, batalkan supaya bisa dicoba lagi
+      const feed = function () { clearTimeout(dog); dog = setTimeout(function () { try { x.abort(); } catch (e) { /* abaikan */ } finish(reject, new Error('stall')); }, STALL_MS); };
       x.open('PUT', url, true);
       if (range) x.setRequestHeader('Content-Range', range);
-      x.upload.onprogress = function (e) { if (onProgress && e.lengthComputable) onProgress(e.loaded); };
+      x.upload.onprogress = function (e) { feed(); if (onProgress && e.lengthComputable) onProgress(e.loaded); };
       x.onload = function () {
         let rangeHeader = null;
         try { rangeHeader = x.getResponseHeader('Range'); } catch (e) { rangeHeader = null; }
-        resolve({ status: x.status, text: x.responseText, range: rangeHeader });
+        finish(resolve, { status: x.status, text: x.responseText, range: rangeHeader });
       };
-      x.onerror = function () { reject(new Error('network')); };
-      x.ontimeout = function () { reject(new Error('timeout')); };
+      x.onerror = function () { finish(reject, new Error('network')); };
+      x.onabort = function () { finish(reject, new Error('abort')); };
+      feed();
       x.send(body);
     });
   }
   function parseId(text) { try { return JSON.parse(text).id || null; } catch (e) { return null; } }
   function sessionGone() { return Object.assign(new Error('Sesi upload kedaluwarsa.'), { code: 'SESSION' }); }
 
-  WC.putResumable = async function (uploadUrl, blob, onProgress) {
+  // Tanya Drive: sesi ini sudah menerima sampai byte berapa? -> { id } kalau sudah selesai, atau { offset }
+  async function askOffset(uploadUrl, total) {
+    const q = await xhrPut(uploadUrl, null, 'bytes */' + total);
+    if (q.status === 200 || q.status === 201) { const id = parseId(q.text); if (id) return { id: id }; }
+    if (q.status === 404 || q.status === 410 || q.status === 400) throw sessionGone();
+    if (q.status === 308) {
+      const m = q.range ? /bytes=0-(\d+)/.exec(q.range) : null;
+      return { offset: m ? Number(m[1]) + 1 : 0 };
+    }
+    throw new Error('HTTP ' + q.status);
+  }
+
+  // opts.resume = true: lanjutkan sesi lama dari byte terakhir yang sudah diterima Drive
+  WC.putResumable = async function (uploadUrl, blob, onProgress, opts) {
     const total = blob.size;
     let offset = 0, fails = 0;
+    if (opts && opts.resume) {
+      const a = await askOffset(uploadUrl, total);
+      if (a.id) return a.id;
+      offset = a.offset;
+    }
     while (offset < total) {
       const end = Math.min(offset + CHUNK, total);
       const single = offset === 0 && end === total;
@@ -177,14 +206,13 @@
         throw new Error('HTTP ' + r.status);
       } catch (e) {
         if (e.code === 'SESSION') throw e;
-        if (++fails > 5) throw Object.assign(new Error('Upload gagal, sinyal terputus.'), { code: 'NETWORK' });
+        if (++fails > 3) throw Object.assign(new Error('Sinyal terputus saat mengirim.'), { code: 'NETWORK' });
         await WC.sleep(1500 * fails);
-        try {     // tanya Drive: sudah terima sampai byte berapa?
-          const q = await xhrPut(uploadUrl, null, 'bytes */' + total);
-          if (q.status === 200 || q.status === 201) { const id = parseId(q.text); if (id) return id; }
-          if (q.status === 308 && q.range) { const m = /bytes=0-(\d+)/.exec(q.range); if (m) offset = Number(m[1]) + 1; }
-          if (q.status === 404 || q.status === 410) throw sessionGone();
-        } catch (e2) { if (e2.code === 'SESSION') throw e2; }
+        try {
+          const a = await askOffset(uploadUrl, total);
+          if (a.id) return a.id;
+          offset = a.offset;
+        } catch (e2) { if (e2.code === 'SESSION') throw e2; /* masih offline: ulangi potongan yang sama */ }
       }
     }
     throw new Error('Upload tidak selesai.');
@@ -223,19 +251,36 @@
     return (await requestTickets(ev, meta, blob, 1))[0];
   }
 
+  // Alamat sesi upload diingat per jepretan. Kalau kiriman terputus, percobaan berikutnya MELANJUTKAN
+  // sesi yang sama (tanpa minta tiket baru ke server dan tanpa mengulang dari nol).
+  const sess = {
+    all: function () { try { return JSON.parse(store('wc_sessions') || '{}'); } catch (e) { return {}; } },
+    get: function (key) { return key ? sess.all()[key] : null; },
+    set: function (key, url) { if (!key) return; const m = sess.all(); if (url) m[key] = url; else delete m[key]; store('wc_sessions', JSON.stringify(m)); }
+  };
+  WC.sessions = sess;
+
   // Ambil tiket -> kirim ke Drive. Mengembalikan ID file di Drive.
-  WC.uploadFile = async function (blob, meta, onProgress) {
+  WC.uploadFile = async function (blob, meta, onProgress, key) {
     const ev = meta.event || WC.event;
+    const old = sess.get(key);
+    const keep = function (id) { sess.set(key, 'id:' + id); return id; };     // file sudah di Drive: cukup dicatat, jangan dikirim ulang
+    if (old && old.indexOf('id:') === 0) return old.slice(3);
+    if (old) {
+      try { return keep(await WC.putResumable(old, blob, onProgress, { resume: true })); }
+      catch (e) { if (e.code !== 'SESSION') throw e; sess.set(key, null); }       // sesi lama hangus: minta tiket baru
+    }
     for (let attempt = 0; ; attempt++) {
       const url = await takeTicket(ev, meta, blob);
-      try { return await WC.putResumable(url, blob, onProgress); }
-      catch (e) { if (e.code === 'SESSION' && attempt < 1) { pool[ev] = []; continue; } throw e; }
+      sess.set(key, url);
+      try { return keep(await WC.putResumable(url, blob, onProgress)); }
+      catch (e) { if (e.code === 'SESSION' && attempt < 1) { pool[ev] = []; sess.set(key, null); continue; } throw e; }
     }
   };
   // Alur lengkap untuk kiriman tamu: kirim ke Drive -> catat di tab event
-  WC.upload = async function (blob, meta, onProgress) {
+  WC.upload = async function (blob, meta, onProgress, key) {
     const ev = meta.event || WC.event;
-    const fileId = await WC.uploadFile(blob, meta, onProgress);
+    const fileId = await WC.uploadFile(blob, meta, onProgress, key);
     return WC.api('completeUpload', { event: ev, fileId: fileId, guest: meta.guest || WC.guestName(), source: meta.source, caption: meta.caption, pin: WC.pin() || undefined });
   };
 
@@ -307,10 +352,12 @@
   /* ============================================================
      ANTREAN KIRIM — sampai 3 jepretan dikirim BERSAMAAN
      ============================================================ */
-  const Q = (WC.queue = { items: null, active: {}, listeners: [], retryTimer: null, primary: false });
+  const Q = (WC.queue = { items: null, active: {}, listeners: [], retryTimer: null, primary: false, lastError: '' });
   const MAX_PARALLEL = 3;
+  const BIG = 12 * 1024 * 1024;          // di atas ini dianggap "berat" (video panjang)
   const DROP_CODES = { LIMIT: 1, CLOSED: 1, NOT_ALLOWED: 1, BAD_REQUEST: 1, NO_EVENT: 1 };
   function emit(type, item, extra) { Q.listeners.forEach(function (fn) { try { fn(type, item, extra); } catch (e) { /* abaikan */ } }); }
+  function isBig(it) { return it.blob && it.blob.size > BIG; }
   Q.on = function (fn) { Q.listeners.push(fn); };
   // force = baca ulang dari penyimpanan (tab lain mungkin sudah mengirim sebagian)
   Q.load = async function (force) {
@@ -318,7 +365,7 @@
       const old = Q.items || [];
       Q.items = (await dbAll('shots')).map(function (it) {
         const prev = old.find(function (o) { return o.id === it.id; });
-        if (prev && prev.retryAt) it.retryAt = prev.retryAt;
+        if (prev) { it.retryAt = prev.retryAt; it.fails = prev.fails; }
         return it;
       });
     }
@@ -326,6 +373,11 @@
   };
   Q.pending = function (event, source) {
     return (Q.items || []).filter(function (i) { return (!event || i.meta.event === event) && (!source || i.meta.source === source); }).length;
+  };
+  // jumlah yang sedang menunggu dicoba ulang (untuk ditampilkan ke tamu)
+  Q.waiting = function (event) {
+    const now = Date.now();
+    return (Q.items || []).filter(function (i) { return (!event || i.meta.event === event) && i.fails > 0 && !Q.active[i.id] && i.retryAt > now; }).length;
   };
   Q.add = async function (blob, meta) {
     await Q.load();
@@ -336,45 +388,54 @@
     Q.pump();
     return item;
   };
+  function forget(item) { Q.items = Q.items.filter(function (i) { return i.id !== item.id; }); sess.set(item.id, null); }
+
   // Satu jepretan hanya boleh dikirim oleh SATU tab (kamera & album bisa terbuka bersamaan)
   function withLock(item, fn) {
     if (navigator.locks && navigator.locks.request) {
       return navigator.locks.request('wc-shot-' + item.id, { ifAvailable: true }, function (lock) {
         if (lock) return fn();
-        setTimeout(Q.pump, 4500);          // sedang dikirim tab lain: cek lagi nanti
+        item.retryAt = Date.now() + 5000;      // sedang dikirim tab lain: cek lagi nanti
+        schedule(5200);
         return null;
       });
     }
     return fn();
   }
+  function schedule(ms) { clearTimeout(Q.retryTimer); Q.retryTimer = setTimeout(Q.pump, ms); }
   function handle(item) {
     return withLock(item, function () { return send(item); }).then(function () {}, function () {}).then(function () {
       delete Q.active[item.id];
+      emit('settled', item);
       Q.pump();
     });
   }
   async function send(item) {
     if (!(await dbHas('shots', item.id))) {      // sudah dikirim tab lain
-      Q.items = Q.items.filter(function (i) { return i.id !== item.id; });
+      forget(item);
       emit('done', item, null);
       return;
     }
     try {
-      const r = await WC.upload(item.blob, item.meta);
+      const r = await WC.upload(item.blob, item.meta, null, item.id);
       await dbDel('shots', item.id);
-      Q.items = Q.items.filter(function (i) { return i.id !== item.id; });
+      forget(item);
       await T.setFile(item.id, r.item.fileId);
+      Q.lastError = '';
       emit('done', item, r);
     } catch (e) {
       if (DROP_CODES[e.code]) {            // ditolak server: buang supaya tidak mengulang selamanya
         await dbDel('shots', item.id); await T.remove(item.id);
-        Q.items = Q.items.filter(function (i) { return i.id !== item.id; });
+        forget(item);
         emit('rejected', item, e);
-      } else {                              // sinyal jelek: coba lagi nanti
-        item.retryAt = Date.now() + 12000;
+      } else {
+        // Gagal sementara: coba lagi dengan jeda yang makin panjang (10 dtk, 20 dtk, 40 dtk ... maksimal 5 menit).
+        // Jeda ini penting supaya server tidak dibanjiri permintaan saat ada gangguan.
+        item.fails = (item.fails || 0) + 1;
+        const wait = Math.min(300000, 10000 * Math.pow(2, item.fails - 1));
+        item.retryAt = Date.now() + wait;
+        Q.lastError = (e && e.message) || 'gagal';
         emit('failed', item, e);
-        clearTimeout(Q.retryTimer);
-        Q.retryTimer = setTimeout(Q.pump, 12500);
       }
     }
   }
@@ -383,14 +444,24 @@
     if (!Q.primary && !(navigator.locks && navigator.locks.request)) return;
     await Q.load();
     const now = Date.now();
-    for (let i = 0; i < Q.items.length && Object.keys(Q.active).length < MAX_PARALLEL; i++) {
-      const it = Q.items[i];
-      if (Q.active[it.id] || (it.retryAt && it.retryAt > now)) continue;
+    // Yang ringan (foto) didahulukan, dan hanya SATU kiriman berat (video panjang) dalam satu waktu,
+    // supaya foto tidak pernah tertahan di belakang video.
+    const order = Q.items.slice().sort(function (a, b) { return (isBig(a) - isBig(b)) || (a.createdAt - b.createdAt); });
+    let bigActive = Q.items.some(function (i) { return Q.active[i.id] && isBig(i); });
+    let next = Infinity;
+    for (let i = 0; i < order.length; i++) {
+      const it = order[i];
+      if (Q.active[it.id]) continue;
+      if (it.retryAt && it.retryAt > now) { next = Math.min(next, it.retryAt - now); continue; }
+      if (Object.keys(Q.active).length >= MAX_PARALLEL) break;
+      if (isBig(it)) { if (bigActive) continue; bigActive = true; }
       Q.active[it.id] = true;
-      it.retryAt = now + 4000;        // kalau sedang dipegang tab lain, cek lagi sebentar lagi
       handle(it);
     }
+    if (next !== Infinity) schedule(next + 300);
   };
-  window.addEventListener('online', function () { (Q.items || []).forEach(function (i) { i.retryAt = 0; }); Q.pump(); });
+  // "Kirim ulang sekarang": abaikan jeda tunggu
+  Q.retryNow = function () { (Q.items || []).forEach(function (i) { if (!Q.active[i.id]) i.retryAt = 0; }); return Q.pump(); };
+  window.addEventListener('online', function () { Q.retryNow(); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) Q.pump(); });
 })();

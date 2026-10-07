@@ -424,3 +424,6 @@ code.kbd { font-family: 'Courier New', monospace; background: var(--cream-dark);
 #c-flash-btn { position: relative; }
 #c-flash-btn:not(.on)::after { content: ''; position: absolute; left: 50%; top: 50%; width: 27px; height: 1.5px; background: currentColor; transform: translate(-50%, -50%) rotate(-45deg); opacity: 0.85; }
 #c-flash-btn.on { background: var(--gold); color: var(--ink); box-shadow: 0 0 0 4px rgba(201,169,110,0.25); }
+
+/* v3.3 — status kiriman yang tertunda */
+.cam-status.has-issue { color: #ffb347; cursor: pointer; letter-spacing: 0.04em; line-height: 1.4; }

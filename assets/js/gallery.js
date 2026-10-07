@@ -148,7 +148,7 @@
   function stopPolling() { clearInterval(state.pollTimer); state.pollTimer = null; }
   document.addEventListener('visibilitychange', function () { if (!document.hidden) load(true); });
   // jepretan yang baru selesai terkirim dari HP ini: langsung perbarui
-  WC.queue.on(function (type, item) { if (item.meta.event === WC.event && type !== 'added') load(true); });
+  WC.queue.on(function (type, item) { if (item.meta.event === WC.event && (type === 'done' || type === 'rejected')) load(true); });
 
   /* ---------- hitung mundur ---------- */
   function startCountdown() {

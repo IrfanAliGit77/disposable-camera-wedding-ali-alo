@@ -182,6 +182,10 @@
     const parts = [];
     const p = pending();
     if (p > 0) parts.push('mengirim ' + p + ' jepretan\u2026');
+    // kalau ada yang tertunda, tampilkan alasannya supaya tidak terlihat "mengirim" tanpa kejelasan
+    const waiting = WC.queue.waiting(WC.event);
+    if (waiting > 0 && WC.queue.lastError) parts.push('tertunda: ' + WC.queue.lastError + ' Dicoba lagi otomatis, atau ketuk di sini.');
+    el.status.classList.toggle('has-issue', waiting > 0);
     if (state.libActive > 0) parts.push('mengirim ' + state.libActive + ' file dari galeri');
     if (!parts.length && remaining() <= 0) parts.push('Rol film habis. Terima kasih sudah mengabadikan momen kami!');
     let html = WC.esc(parts.join(' · '));
@@ -399,6 +403,12 @@
     if (document.hidden) { if (state.recorder) stopRecording(); }
     else if (!el.cam.hidden && (!state.stream || !state.stream.active)) startCamera();
   });
+  el.status.addEventListener('click', function () {
+    if (!WC.queue.waiting(WC.event)) return;
+    WC.toast('Mencoba mengirim ulang\u2026', 1500);
+    WC.queue.retryNow();
+  });
+  setInterval(updateStatus, 5000);       // status selalu mengikuti keadaan terbaru
   window.addEventListener('beforeunload', function (e) {
     if (state.libActive > 0) { e.preventDefault(); e.returnValue = ''; }
   });
