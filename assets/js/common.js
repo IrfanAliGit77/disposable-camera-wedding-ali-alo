@@ -49,7 +49,7 @@
   const STALL_MS = Number(C.STALL_MS) || 40000;      // upload dianggap macet kalau selama ini tidak ada kemajuan
 
   /* ---------- panggil backend Apps Script ---------- */
-  WC.api = async function (action, data) {
+  WC.api = async function (action, data, opts) {
     if (!C.API_URL || C.API_URL.indexOf('TEMPEL') === 0) {
       throw Object.assign(new Error('API_URL belum diisi di assets/js/config.js'), { code: 'CONFIG' });
     }
@@ -57,7 +57,7 @@
     let res;
     // Batas waktu: permintaan yang menggantung (sering terjadi saat HP dikunci/pindah aplikasi) dibatalkan, bukan ditunggu selamanya
     const ctl = window.AbortController ? new AbortController() : null;
-    const timer = ctl ? setTimeout(function () { ctl.abort(); }, API_TIMEOUT) : null;
+    const timer = ctl ? setTimeout(function () { ctl.abort(); }, (opts && opts.timeout) || API_TIMEOUT) : null;
     try {
       // Sengaja tanpa header Content-Type: supaya jadi "simple request" dan lolos CORS Apps Script
       res = await fetch(C.API_URL, { method: 'POST', body: JSON.stringify(body), redirect: 'follow', signal: ctl ? ctl.signal : undefined });
@@ -218,37 +218,17 @@
     throw new Error('Upload tidak selesai.');
   };
 
-  /* ---------- stok "tiket upload" ----------
-     Untuk foto kamera, beberapa tiket diminta sekaligus di awal. Jadi begitu tombol
-     rana ditekan, foto langsung dikirim ke Drive tanpa menunggu tanya server dulu. */
-  const pool = {};          // kode event -> [uploadUrl]
-  const refilling = {};
-  function isCamPhoto(meta) { return meta.source === 'camera' && meta.type === 'photo'; }
-  async function requestTickets(ev, meta, blob, count) {
+  /* ---------- tiket upload (hanya untuk file besar) ----------
+     Tiap tiket memakai 1 dari jatah 20.000 "URL Fetch" per hari milik akun pemilik script.
+     Karena itu foto dan video pendek TIDAK memakai tiket (lihat WC.upload di bawah). */
+  const pool = {};
+  WC.prewarm = function () { /* tidak dipakai lagi; dibiarkan supaya kode lama tidak error */ };
+  async function takeTicket(ev, meta, blob) {
     const r = await WC.api('initUpload', {
       event: ev, source: meta.source, guest: meta.guest || WC.guestName(), pin: WC.pin() || undefined,
-      mime: (blob && blob.type) || 'image/jpeg', size: count > 1 ? 0 : (blob ? blob.size : 0), count: count, origin: location.origin
+      mime: (blob && blob.type) || 'application/octet-stream', size: blob ? blob.size : 0, duration: meta.duration || 0, origin: location.origin
     });
-    return r.tickets.map(function (t) { return t.uploadUrl; });
-  }
-  function refill(ev) {
-    if (refilling[ev]) return;
-    refilling[ev] = true;
-    requestTickets(ev, { source: 'camera', type: 'photo' }, null, 4)
-      .then(function (list) { pool[ev] = (pool[ev] || []).concat(list); }, function () { /* tidak apa: diminta lagi saat dibutuhkan */ })
-      .then(function () { refilling[ev] = false; });
-  }
-  WC.prewarm = function () { if (WC.event && !(pool[WC.event] || []).length) refill(WC.event); };
-  async function takeTicket(ev, meta, blob) {
-    if (isCamPhoto(meta) && blob.type === 'image/jpeg') {
-      const p = (pool[ev] = pool[ev] || []);
-      if (p.length) { const t = p.shift(); if (p.length < 2) refill(ev); return t; }
-      const list = await requestTickets(ev, meta, blob, 4);
-      const t = list.shift();
-      pool[ev] = (pool[ev] || []).concat(list);
-      return t;
-    }
-    return (await requestTickets(ev, meta, blob, 1))[0];
+    return r.tickets[0].uploadUrl;
   }
 
   // Alamat sesi upload diingat per jepretan. Kalau kiriman terputus, percobaan berikutnya MELANJUTKAN
@@ -277,11 +257,30 @@
       catch (e) { if (e.code === 'SESSION' && attempt < 1) { pool[ev] = []; sess.set(key, null); continue; } throw e; }
     }
   };
-  // Alur lengkap untuk kiriman tamu: kirim ke Drive -> catat di tab event
+  const SMALL = 5 * 1024 * 1024;
+  function toBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      const fr = new FileReader();
+      fr.onload = function () { const t = String(fr.result); resolve(t.slice(t.indexOf(',') + 1)); };
+      fr.onerror = function () { reject(new Error('File tidak terbaca.')); };
+      fr.readAsDataURL(blob);
+    });
+  }
+  /* Alur lengkap untuk kiriman tamu.
+     - File kecil (foto, video pendek): SATU panggilan ke script yang langsung menyimpan ke Drive dan mencatatnya.
+       Tidak memakai jatah URL Fetch, jadi aman untuk ribuan tamu.
+     - File besar: tiket upload -> kirim langsung ke Drive per potongan -> catat. */
   WC.upload = async function (blob, meta, onProgress, key) {
     const ev = meta.event || WC.event;
+    const base = { event: ev, guest: meta.guest || WC.guestName(), source: meta.source, caption: meta.caption, duration: meta.duration || 0, uid: key, pin: WC.pin() || undefined };
+    if (blob.size <= SMALL && !(sess.get(key))) {
+      const data = await toBase64(blob);
+      const r = await WC.api('upload', Object.assign({ mime: blob.type || 'image/jpeg', data: data }, base), { timeout: 120000 });
+      if (onProgress) onProgress(1);
+      return r;
+    }
     const fileId = await WC.uploadFile(blob, meta, onProgress, key);
-    return WC.api('completeUpload', { event: ev, fileId: fileId, guest: meta.guest || WC.guestName(), source: meta.source, caption: meta.caption, pin: WC.pin() || undefined });
+    return WC.api('completeUpload', Object.assign({ fileId: fileId }, base));
   };
 
   /* ============================================================

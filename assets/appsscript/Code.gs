@@ -8,6 +8,13 @@
  *   - 1 link + QR tamu sendiri    (index.html?e=kode-event)
  *   - pengaturan sendiri
  *
+ *  RANCANGAN UNTUK ACARA BESAR (ribuan tamu):
+ *   - Foto & video pendek dikirim lewat script ini langsung ke Drive (DriveApp),
+ *     jadi TIDAK memakai jatah "URL Fetch 20.000/hari".
+ *   - Hanya file besar (video panjang / upload galeri) yang memakai tiket upload (1 UrlFetch per file).
+ *   - Daftar album dibaca per halaman, dan hampir semua bacaan lewat cache,
+ *     supaya 1.000 tamu tidak membuat Sheet dibaca utuh berulang-ulang.
+ *
  *  LANGKAH PAKAI (detail di PANDUAN.md):
  *   a. Ganti ADMIN_PIN di bawah.
  *   b. Jalankan fungsi  setup  satu kali (tombol Run), izinkan aksesnya.
@@ -23,7 +30,9 @@ const ROOT_FOLDER_NAME = 'Disposable Camera Events'; // folder induk di Drive (d
 
 const EVENTS_SHEET = '_Events';
 const EVENT_HEADERS = ['slug', 'name', 'folderId', 'sheetName', 'settings', 'createdAt'];
-const HEADERS = ['id', 'fileId', 'type', 'mime', 'size', 'guest', 'deviceId', 'source', 'caption', 'createdAt', 'hidden'];
+const HEADERS = ['id', 'fileId', 'type', 'mime', 'size', 'guest', 'deviceId', 'source', 'caption', 'createdAt', 'hidden', 'duration'];
+const SMALL_MAX = 8 * 1024 * 1024;   // file sampai ukuran ini dikirim lewat script (tanpa memakai jatah UrlFetch)
+const CACHE_LONG = 21600;            // 6 jam (maksimum CacheService)
 
 // Pengaturan awal setiap event baru. Semuanya bisa diubah dari dashboard.
 const DEFAULT_SETTINGS = {
@@ -32,7 +41,7 @@ const DEFAULT_SETTINGS = {
   cameraOpen: true,
   shotsPerGuest: 27,
   allowVideo: true,
-  maxVideoSeconds: 15,
+  maxVideoSeconds: 300,           // TOTAL durasi video per tamu (detik), boleh dipecah jadi beberapa video
   allowLibrary: true,
   albumMode: 'reveal',            // 'reveal' = dibuka pada revealAt, 'live' = langsung terlihat
   revealAt: '',
@@ -76,6 +85,14 @@ function setup() {
   // Folder induk dibuat privat; yang dibagikan "siapa pun dengan link" hanya folder tiap event
   try { root.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.EDIT); } catch (err) { /* tidak apa */ }
 
+  // kolom baru "duration" untuk tab event yang sudah ada
+  const cache = CacheService.getScriptCache();
+  cache.remove('ids'); cache.remove('events');
+  readEvents_(true).forEach(function (e) {
+    const sh = ss.getSheetByName(e.sheetName);
+    if (sh) { sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold'); sh.getRange(1, 1, sh.getMaxRows(), HEADERS.length).setNumberFormat('@'); }
+    cache.remove('n_' + e.slug);
+  });
   clearCache_();
   Logger.log('SETUP SELESAI');
   Logger.log('Spreadsheet  : ' + ss.getUrl());
@@ -87,7 +104,7 @@ function setup() {
  *  PINTU MASUK WEB APP
  * ------------------------------------------------------------ */
 function doGet() {
-  return json_({ ok: true, app: 'disposable-camera', version: 2, ready: isReady_(), time: new Date().toISOString() });
+  return json_({ ok: true, app: 'disposable-camera', version: 4, ready: isReady_(), time: new Date().toISOString() });
 }
 
 function doPost(e) {
@@ -95,7 +112,7 @@ function doPost(e) {
     const d = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     if (!isReady_()) throw err_('Backend belum di-setup. Jalankan fungsi setup() dulu.', 'NOT_READY');
     const routes = {
-      config: actConfig_, initUpload: actInitUpload_, completeUpload: actCompleteUpload_, list: actList_,
+      config: actConfig_, upload: actUpload_, initUpload: actInitUpload_, completeUpload: actCompleteUpload_, list: actList_, adminStats: actAdminStats_,
       adminLogin: actAdminLogin_, adminEvents: actAdminEvents_, adminCreateEvent: actAdminCreateEvent_, adminDeleteEvent: actAdminDeleteEvent_,
       adminSaveSettings: actAdminSaveSettings_, adminSetCover: actAdminSetCover_, adminSetHidden: actAdminSetHidden_, adminDelete: actAdminDelete_
     };
@@ -114,20 +131,19 @@ function doPost(e) {
  * ------------------------------------------------------------ */
 function actConfig_(d) {
   const ev = getEvent_(d.event);
-  const rows = readRows_(ev);
+  const st = deviceState_(ev, cleanId_(d.deviceId));
   return {
     settings: publicSettings_(ev),
     revealed: isRevealed_(ev.settings),
     serverTime: new Date().toISOString(),
-    used: countUsed_(rows, d.deviceId),
-    counts: counts_(visible_(rows))
+    used: st.p,
+    usedVideo: st.s,
+    total: total_(ev)
   };
 }
 
-// Langkah 1 upload: minta "tiket" (alamat upload sekali pakai) ke Google Drive.
-// Untuk foto kamera boleh minta beberapa tiket sekaligus (count) supaya jepretan berikutnya langsung terkirim.
-function actInitUpload_(d) {
-  const ev = getEvent_(d.event);
+// Pemeriksaan bersama sebelum menerima kiriman. Mengembalikan data yang sudah dirapikan.
+function admit_(ev, d) {
   const s = ev.settings;
   const admin = !!role_(d, ev);
   const source = d.source === 'library' ? 'library' : (d.source === 'cover' ? 'cover' : 'camera');
@@ -144,117 +160,218 @@ function actInitUpload_(d) {
 
   const deviceId = cleanId_(d.deviceId);
   if (!deviceId) throw err_('deviceId kosong.', 'BAD_REQUEST');
-  if (source === 'camera' && !admin && countUsed_(readRows_(ev), deviceId) >= Number(s.shotsPerGuest)) {
-    throw err_('Rol film kamu sudah habis. Terima kasih sudah mengabadikan momen kami!', 'LIMIT');
+  const duration = isVideo ? Math.max(0, Math.min(36000, Number(d.duration) || 0)) : 0;
+  if (source === 'camera' && !admin) {
+    const st = deviceState_(ev, deviceId);
+    if (isImage && st.p >= Number(s.shotsPerGuest)) throw err_('Rol film kamu sudah habis. Terima kasih sudah mengabadikan momen kami!', 'LIMIT');
+    // jatah video = TOTAL detik per tamu (toleransi 2 detik untuk pembulatan)
+    if (isVideo && st.s + duration > Number(s.maxVideoSeconds) + 2) throw err_('Jatah durasi video kamu sudah habis.', 'LIMIT');
   }
-  const origin = String(d.origin || '');
-  if (!/^https?:\/\/[^\s\/]+$/.test(origin)) throw err_('Buka aplikasi lewat alamat http/https (bukan file://).', 'BAD_REQUEST');
-
-  const count = (source === 'camera' && isImage) ? clamp_(d.count || 1, 1, 5) : 1;
-  const size = Number(d.size) || 0;
-  const token = ScriptApp.getOAuthToken();
-  const stamp = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyyMMdd-HHmmss');
-  const base = source === 'cover' ? '_sampul' : stamp + '_' + (safeName_(d.guest) || 'Tamu');
-  const requests = [];
-  for (let i = 0; i < count; i++) {
-    const headers = { Authorization: 'Bearer ' + token, 'X-Upload-Content-Type': mime, Origin: origin };  // Origin: izin CORS untuk browser tamu
-    if (size > 0 && count === 1) headers['X-Upload-Content-Length'] = String(size);
-    requests.push({
-      url: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id',
-      method: 'post',
-      contentType: 'application/json; charset=UTF-8',
-      headers: headers,
-      payload: JSON.stringify({ name: base + '_' + Utilities.getUuid().slice(0, 6) + '.' + extFor_(mime), mimeType: mime, parents: [ev.folderId] }),
-      muteHttpExceptions: true
-    });
-  }
-  const tickets = UrlFetchApp.fetchAll(requests).map(function (res) {
-    if (res.getResponseCode() !== 200) throw err_('Drive menolak membuat sesi upload (' + res.getResponseCode() + '): ' + res.getContentText().slice(0, 200), 'DRIVE');
-    const h = res.getHeaders();
-    const url = h['Location'] || h['location'];
-    if (!url) throw err_('Drive tidak memberi alamat upload.', 'DRIVE');
-    return { uploadUrl: url };
-  });
-  return { tickets: tickets };
+  return { admin: admin, source: source, mime: mime, isVideo: isVideo, deviceId: deviceId, duration: duration };
+}
+function fileName_(a, d) {
+  if (a.source === 'cover') return '_sampul_' + Utilities.getUuid().slice(0, 6) + '.' + extFor_(a.mime);
+  return Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyyMMdd-HHmmss') + '_' + (safeName_(d.guest) || 'Tamu') + '_' + Utilities.getUuid().slice(0, 6) + '.' + extFor_(a.mime);
+}
+// Kiriman yang sama (dicoba ulang oleh HP karena sinyal jelek) tidak boleh tercatat dua kali
+function seen_(uid) {
+  uid = cleanId_(uid);
+  if (!uid) return null;
+  const hit = CacheService.getScriptCache().get('x_' + uid);
+  if (!hit) return null;
+  try { return JSON.parse(hit); } catch (e) { return null; }
+}
+function remember_(uid, out) {
+  uid = cleanId_(uid);
+  if (uid) { try { CacheService.getScriptCache().put('x_' + uid, JSON.stringify(out), CACHE_LONG); } catch (e) { /* abaikan */ } }
 }
 
-// Langkah 2 upload: setelah file masuk Drive, catat di tab event
-function actCompleteUpload_(d) {
+// JALUR UTAMA (foto & video pendek): file dikirim sebagai teks base64, disimpan ke Drive dan dicatat dalam SATU panggilan.
+// Tidak memakai UrlFetch sama sekali.
+function actUpload_(d) {
+  const done = seen_(d.uid);
+  if (done) return done;
   const ev = getEvent_(d.event);
-  const admin = !!role_(d, ev);
+  const a = admit_(ev, d);
+  if (a.source === 'cover') throw err_('Foto sampul dikirim lewat tiket upload.', 'BAD_REQUEST');
+  const bytes = Utilities.base64Decode(String(d.data || ''));
+  if (!bytes.length) throw err_('File kosong.', 'BAD_REQUEST');
+  if (bytes.length > SMALL_MAX) throw err_('File terlalu besar untuk jalur ini.', 'BAD_REQUEST');
+  const file = DriveApp.getFolderById(ev.folderId).createFile(Utilities.newBlob(bytes, a.mime, fileName_(a, d)));
+  const out = record_(ev, d, a, file.getId(), bytes.length);
+  remember_(d.uid, out);
+  return out;
+}
+
+// JALUR FILE BESAR, langkah 1: minta "tiket" (alamat upload sekali pakai) ke Google Drive. Memakai 1 UrlFetch.
+function actInitUpload_(d) {
+  const ev = getEvent_(d.event);
+  const a = admit_(ev, d);
+  const origin = String(d.origin || '');
+  if (!/^https?:\/\/[^\s\/]+$/.test(origin)) throw err_('Buka aplikasi lewat alamat http/https (bukan file://).', 'BAD_REQUEST');
+  const size = Number(d.size) || 0;
+  const headers = { Authorization: 'Bearer ' + ScriptApp.getOAuthToken(), 'X-Upload-Content-Type': a.mime, Origin: origin };  // Origin: izin CORS untuk browser tamu
+  if (size > 0) headers['X-Upload-Content-Length'] = String(size);
+  const res = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id', {
+    method: 'post',
+    contentType: 'application/json; charset=UTF-8',
+    headers: headers,
+    payload: JSON.stringify({ name: fileName_(a, d), mimeType: a.mime, parents: [ev.folderId] }),
+    muteHttpExceptions: true
+  });
+  if (res.getResponseCode() !== 200) throw err_('Drive menolak membuat sesi upload (' + res.getResponseCode() + '): ' + res.getContentText().slice(0, 200), 'DRIVE');
+  const h = res.getHeaders();
+  const url = h['Location'] || h['location'];
+  if (!url) throw err_('Drive tidak memberi alamat upload.', 'DRIVE');
+  return { tickets: [{ uploadUrl: url }] };
+}
+
+// JALUR FILE BESAR, langkah 2: setelah file masuk Drive, catat di tab event
+function actCompleteUpload_(d) {
+  const done = seen_(d.uid);
+  if (done) return done;
+  const ev = getEvent_(d.event);
   const fileId = cleanId_(d.fileId);
   if (!fileId) throw err_('fileId kosong.', 'BAD_REQUEST');
   const file = fileInFolder_(fileId, ev.folderId);
+  d.mime = String(file.getMimeType() || '');
+  let a;
+  try { a = admit_(ev, d); }
+  catch (e) { try { file.setTrashed(true); } catch (e2) { /* abaikan */ } throw e; }      // ditolak: jangan tinggalkan file yatim
+  const out = record_(ev, d, a, fileId, file.getSize());
+  remember_(d.uid, out);
+  return out;
+}
 
-  const mime = String(file.getMimeType() || '');
+// Tulis satu baris ke tab event + perbarui catatan pemakaian HP ini (di cache)
+function record_(ev, d, a, fileId, size) {
   const item = {
     id: Utilities.getUuid(),
     fileId: fileId,
-    type: mime.indexOf('video/') === 0 ? 'video' : 'photo',
-    mime: mime,
-    size: file.getSize(),
+    type: a.isVideo ? 'video' : 'photo',
+    mime: a.mime,
+    size: size,
     guest: cleanText_(d.guest, 40) || 'Tamu',
-    deviceId: cleanId_(d.deviceId),
-    source: d.source === 'library' ? 'library' : 'camera',
+    deviceId: a.deviceId,
+    source: a.source === 'library' ? 'library' : 'camera',
     caption: cleanText_(d.caption, 140),
     createdAt: new Date().toISOString(),
-    hidden: false
+    hidden: false,
+    duration: a.duration
   };
+  const sh = eventSheet_(ev);
+  sh.appendRow(HEADERS.map(function (k) { return String(item[k]); }));     // appendRow aman dipanggil bersamaan
+  const cache = CacheService.getScriptCache();
+  try { cache.put('n_' + ev.slug, String(Math.max(0, sh.getLastRow() - 1)), 20); } catch (e) { /* abaikan */ }
 
+  // catatan pemakaian per HP: dikunci sebentar supaya 3 kiriman paralel dari HP yang sama tidak saling menimpa
+  const key = 'd_' + ev.slug + '_' + a.deviceId;
   const lock = LockService.getScriptLock();
-  lock.waitLock(25000);
+  let locked = false;
+  try { locked = lock.tryLock(8000); } catch (e) { locked = false; }
+  let st;
   try {
-    const rows = readRows_(ev, true);
-    for (let i = 0; i < rows.length; i++) {
-      if (rows[i].fileId === fileId) return { item: rows[i], used: countUsed_(rows, item.deviceId) };   // sudah tercatat
+    st = deviceState_(ev, a.deviceId, item.id);
+    if (!st.fresh) {       // fresh = baru dihitung ulang dari Sheet, sudah termasuk baris ini
+      if (item.source === 'camera') { if (a.isVideo) st.s += a.duration; else st.p += 1; }
+      st.items.push(compact_(item));
+      if (st.items.length > 150) st.items = st.items.slice(-150);
     }
-    if (!admin) {
-      let reject = null;
-      if (!ev.settings.cameraOpen) reject = err_('Kamera sudah ditutup oleh mempelai.', 'CLOSED');
-      else if (item.source === 'camera' && countUsed_(rows, item.deviceId) >= Number(ev.settings.shotsPerGuest)) reject = err_('Rol film kamu sudah habis.', 'LIMIT');
-      if (reject) { try { file.setTrashed(true); } catch (e) { /* abaikan */ } throw reject; }
-    }
-    eventSheet_(ev).appendRow(HEADERS.map(function (k) { return String(item[k]); }));
-    clearRowsCache_(ev);
-    rows.push(item);
-    return { item: item, used: countUsed_(rows, item.deviceId) };
-  } finally {
-    lock.releaseLock();
-  }
+    try { cache.put(key, JSON.stringify({ p: st.p, s: st.s, items: st.items }), CACHE_LONG); } catch (e) { /* abaikan */ }
+  } finally { if (locked) lock.releaseLock(); }
+  return { item: publicItem_(item, a.deviceId, false), used: st.p, usedVideo: st.s };
+}
+function compact_(r) { return { id: r.id, fileId: r.fileId, type: r.type, guest: r.guest, createdAt: r.createdAt, size: Number(r.size) || 0, source: r.source, caption: r.caption || '', duration: Number(r.duration) || 0 }; }
+function publicItem_(r, deviceId, admin) {
+  const o = { id: r.id, fileId: r.fileId, type: r.type, guest: r.guest, caption: r.caption || '', createdAt: r.createdAt, size: Number(r.size) || 0, source: r.source, duration: Number(r.duration) || 0, mine: !!deviceId && r.deviceId === deviceId };
+  if (r.row) o.row = r.row;
+  if (admin) { o.hidden = !!r.hidden; o.deviceId = r.deviceId; o.mime = r.mime; }
+  return o;
 }
 
+// Pemakaian satu HP di satu event: { p: jumlah foto kamera, s: total detik video kamera, items: kirimannya sendiri }
+// Disimpan di cache 6 jam. Kalau belum ada, dihitung sekali dari Sheet.
+function deviceState_(ev, deviceId, justAddedId) {
+  const empty = { p: 0, s: 0, items: [] };
+  if (!deviceId) return empty;
+  const cache = CacheService.getScriptCache();
+  const key = 'd_' + ev.slug + '_' + deviceId;
+  const hit = cache.get(key);
+  if (hit) { try { const o = JSON.parse(hit); if (o && o.items) return o; } catch (e) { /* hitung ulang */ } }
+  const st = { p: 0, s: 0, items: [], fresh: true };
+  readRange_(eventSheet_(ev), 1, 1e9).forEach(function (r) {
+    if (r.deviceId !== deviceId) return;
+    if (r.source === 'camera') { if (r.type === 'video') st.s += r.duration; else st.p += 1; }
+    if (!r.hidden) st.items.push(compact_(r));
+  });
+  if (st.items.length > 150) st.items = st.items.slice(-150);
+  try { cache.put(key, JSON.stringify({ p: st.p, s: st.s, items: st.items }), CACHE_LONG); } catch (e) { /* abaikan */ }
+  return st;
+}
+
+/* Daftar album, dibaca PER HALAMAN:
+ *   mode 'tail'   : N kiriman terbaru (bawaan)
+ *   mode 'after'  : kiriman setelah baris ke-`after`  (dipakai saat menyegarkan otomatis; hampir selalu dijawab dari cache)
+ *   mode 'before' : N kiriman sebelum baris ke-`before` (tombol "muat lebih banyak")
+ * `v` berubah setiap admin menyembunyikan/menghapus; saat itu HP memuat ulang dari awal. */
 function actList_(d) {
   const ev = getEvent_(d.event);
   const s = ev.settings;
   const role = role_(d, ev);
   const admin = !!role;
-  const rows = readRows_(ev);
+  const deviceId = cleanId_(d.deviceId);
   const revealed = isRevealed_(s);
-  let items;
-  if (admin) items = rows;
-  else if (revealed) items = visible_(rows);
-  else if (s.guestsSeeOwn && d.deviceId) items = rows.filter(function (r) { return !r.hidden && r.deviceId === d.deviceId; });
-  else items = [];
-
   const out = {
     settings: role === 'master' ? fullSettings_(ev) : publicSettings_(ev),
-    revealed: revealed,
-    admin: admin,
-    role: role || '',
+    revealed: revealed, admin: admin, role: role || '',
     serverTime: new Date().toISOString(),
-    counts: counts_(admin ? rows : visible_(rows)),
-    used: countUsed_(rows, d.deviceId),
-    items: items.map(function (r) {
-      const o = { id: r.id, fileId: r.fileId, type: r.type, guest: r.guest, caption: r.caption, createdAt: r.createdAt, size: r.size, source: r.source, mine: !!d.deviceId && r.deviceId === d.deviceId };
-      if (admin) { o.hidden = r.hidden; o.deviceId = r.deviceId; o.mime = r.mime; }
-      return o;
-    }).reverse()
+    v: version_(ev), items: []
   };
+  const limit = clamp_(d.limit || 60, 1, 200);
+  const mode = d.mode === 'after' || d.mode === 'before' ? d.mode : 'tail';
+
+  if (!admin && !revealed) {
+    // album masih dikunci: hanya kiriman sendiri (dari cache per HP)
+    out.total = total_(ev);
+    out.own = true;
+    if (s.guestsSeeOwn && deviceId) {
+      out.items = deviceState_(ev, deviceId).items.slice().reverse().map(function (r) { r.deviceId = deviceId; return publicItem_(r, deviceId, false); });
+    }
+    return out;
+  }
+
+  if (mode === 'after') {
+    const after = Math.max(0, Number(d.after) || 0);
+    const cached = total_(ev);
+    out.total = cached;
+    out.cursor = after;
+    if (after >= cached) return out;               // tidak ada yang baru: selesai tanpa membuka Sheet
+    const take = Math.min(200, cached - after);
+    out.items = pageItems_(ev, after + 1, take, deviceId, admin);
+    out.cursor = after + take;                     // HP melanjutkan dari sini pada penyegaran berikutnya
+    return out;
+  }
+  const sh = eventSheet_(ev);
+  const n = Math.max(0, sh.getLastRow() - 1);
+  out.total = n;
+  let end = n;
+  if (mode === 'before') end = Math.min(n, Math.max(0, (Number(d.before) || 0) - 1));
+  const start = Math.max(1, end - limit + 1);
+  if (end >= start) out.items = pageItems_(ev, start, end - start + 1, deviceId, admin, sh);
+  out.more = start > 1;
+  out.floor = start;                               // baris tertua yang sudah dikirim ke HP (untuk "muat lebih banyak")
+  if (mode === 'tail') out.cursor = n;
   if (admin) {
     out.folderUrl = 'https://drive.google.com/drive/folders/' + ev.folderId;
-    out.sheetUrl = 'https://docs.google.com/spreadsheets/d/' + prop_('SHEET_ID') + '/edit#gid=' + eventSheet_(ev).getSheetId();
+    out.sheetUrl = 'https://docs.google.com/spreadsheets/d/' + ids_().sheet + '/edit#gid=' + sh.getSheetId();
   }
   return out;
+}
+function pageItems_(ev, start, count, deviceId, admin, sh) {
+  return readRange_(sh || eventSheet_(ev), start, count)
+    .filter(function (r) { return admin || !r.hidden; })
+    .map(function (r) { return publicItem_(r, deviceId, admin); })
+    .reverse();
 }
 
 /* ------------------------------------------------------------
@@ -286,8 +403,8 @@ function actAdminEvents_(d) {
         total: sh ? Math.max(0, sh.getLastRow() - 1) : 0, coverFileId: ev.settings.coverFileId || ''
       };
     }).reverse(),
-    sheetUrl: 'https://docs.google.com/spreadsheets/d/' + prop_('SHEET_ID'),
-    folderUrl: 'https://drive.google.com/drive/folders/' + prop_('FOLDER_ID')
+    sheetUrl: 'https://docs.google.com/spreadsheets/d/' + ids_().sheet,
+    folderUrl: 'https://drive.google.com/drive/folders/' + ids_().folder
   };
 }
 
@@ -311,7 +428,7 @@ function actAdminCreateEvent_(d) {
     let slug = baseSlug; n = 2;
     while (events.some(function (e) { return e.slug === slug; })) slug = baseSlug + '-' + (n++);
 
-    const folder = DriveApp.getFolderById(prop_('FOLDER_ID')).createFolder(finalName);
+    const folder = DriveApp.getFolderById(ids_().folder).createFolder(finalName);
     folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);   // supaya foto bisa tampil di album
 
     const sh = ss.insertSheet(finalName, ss.getSheets().length);
@@ -364,7 +481,7 @@ function actAdminSaveSettings_(d) {
       cameraOpen: bool_(pick_(inp.cameraOpen, cur.cameraOpen)),
       shotsPerGuest: clamp_(pick_(inp.shotsPerGuest, cur.shotsPerGuest), 1, 999),
       allowVideo: bool_(pick_(inp.allowVideo, cur.allowVideo)),
-      maxVideoSeconds: clamp_(pick_(inp.maxVideoSeconds, cur.maxVideoSeconds), 3, 1200),
+      maxVideoSeconds: clamp_(pick_(inp.maxVideoSeconds, cur.maxVideoSeconds), 5, 3600),     // TOTAL detik video per tamu
       allowLibrary: bool_(pick_(inp.allowLibrary, cur.allowLibrary)),
       albumMode: pick_(inp.albumMode, cur.albumMode) === 'live' ? 'live' : 'reveal',
       revealAt: cur.revealAt,
@@ -439,8 +556,10 @@ function actAdminSetHidden_(d) {
   lock.waitLock(25000);
   try {
     const sh = eventSheet_(ev);
-    sh.getRange(findRow_(sh, d.id), HEADERS.indexOf('hidden') + 1).setValue(String(!!d.hidden));
-    clearRowsCache_(ev);
+    const rowNo = findRow_(sh, d.id);
+    sh.getRange(rowNo, HEADERS.indexOf('hidden') + 1).setValue(String(!!d.hidden));
+    const dev = String(sh.getRange(rowNo, HEADERS.indexOf('deviceId') + 1).getValue());
+    touched_(ev, dev);
     return {};
   } finally { lock.releaseLock(); }
 }
@@ -453,12 +572,39 @@ function actAdminDelete_(d) {
   try {
     const sh = eventSheet_(ev);
     const rowNo = findRow_(sh, d.id);
-    const fileId = String(sh.getRange(rowNo, HEADERS.indexOf('fileId') + 1).getValue());
-    try { DriveApp.getFileById(fileId).setTrashed(true); } catch (e) { /* file sudah tidak ada */ }
+    const row = sh.getRange(rowNo, 1, 1, HEADERS.length).getValues()[0];
+    try { DriveApp.getFileById(String(row[HEADERS.indexOf('fileId')])).setTrashed(true); } catch (e) { /* file sudah tidak ada */ }
     sh.deleteRow(rowNo);
-    clearRowsCache_(ev);
+    touched_(ev, String(row[HEADERS.indexOf('deviceId')]));
     return {};
   } finally { lock.releaseLock(); }
+}
+// Setelah admin mengubah/menghapus baris: buang cache terkait dan naikkan nomor versi daftar
+function touched_(ev, deviceId) {
+  const cache = CacheService.getScriptCache();
+  cache.remove('n_' + ev.slug);
+  if (deviceId) cache.remove('d_' + ev.slug + '_' + deviceId);
+  const v = String(Date.now());
+  PropertiesService.getScriptProperties().setProperty('v_' + ev.slug, v);
+  cache.put('v_' + ev.slug, v, CACHE_LONG);
+}
+
+// Statistik lengkap untuk dashboard (membaca seluruh tab; hanya dipanggil admin)
+function actAdminStats_(d) {
+  const ev = getEvent_(d.event);
+  requireAdmin_(d, ev);
+  const rows = readRange_(eventSheet_(ev), 1, 1e9);
+  const g = {};
+  let photos = 0, videos = 0, bytes = 0, hidden = 0, seconds = 0;
+  rows.forEach(function (r) {
+    if (r.type === 'video') { videos++; seconds += r.duration; } else photos++;
+    bytes += r.size; if (r.hidden) hidden++;
+    const k = r.deviceId || r.guest;
+    const o = g[k] || (g[k] = { name: r.guest, n: 0, sec: 0 });
+    o.n++; o.name = r.guest || o.name; if (r.type === 'video') o.sec += r.duration;
+  });
+  const list = Object.keys(g).map(function (k) { return g[k]; }).sort(function (x, y) { return y.n - x.n; });
+  return { counts: { photos: photos, videos: videos, guests: list.length, bytes: bytes, hidden: hidden, videoSeconds: Math.round(seconds) }, guests: list.slice(0, 100) };
 }
 
 /* ------------------------------------------------------------
@@ -467,11 +613,18 @@ function actAdminDelete_(d) {
 function json_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
 function err_(message, code) { const e = new Error(message); e.code = code; return e; }
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
-function ss_() { return SpreadsheetApp.openById(prop_('SHEET_ID')); }
-function isReady_() {
-  if (!prop_('FOLDER_ID') || !prop_('SHEET_ID')) return false;
-  try { return !!ss_().getSheetByName(EVENTS_SHEET); } catch (e) { return false; }
+// ID Sheet & folder induk disimpan di cache: Properties punya jatah baca 50.000/hari, jadi jangan dibaca di setiap permintaan
+function ids_() {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get('ids');
+  if (hit) { try { const o = JSON.parse(hit); if (o.sheet && o.folder) return o; } catch (e) { /* baca ulang */ } }
+  const o = { sheet: prop_('SHEET_ID'), folder: prop_('FOLDER_ID') };
+  if (o.sheet && o.folder) cache.put('ids', JSON.stringify(o), CACHE_LONG);
+  return o;
 }
+let SS_ = null;
+function ss_() { return SS_ || (SS_ = SpreadsheetApp.openById(ids_().sheet)); }
+function isReady_() { const o = ids_(); return !!(o.sheet && o.folder); }
 
 /* ---------- event ---------- */
 function readEvents_(fresh) {
@@ -496,7 +649,7 @@ function readEvents_(fresh) {
         createdAt: (v[5] instanceof Date) ? v[5].toISOString() : String(v[5]) });
     }
   }
-  try { const str = JSON.stringify(out); if (str.length < 95000) cache.put('events', str, 60); } catch (e) { /* abaikan */ }
+  try { const str = JSON.stringify(out); if (str.length < 95000) cache.put('events', str, 300); } catch (e) { /* abaikan */ }
   return out;
 }
 function getEvent_(slug, fresh) {
@@ -553,36 +706,45 @@ function requireAdmin_(d, ev) {
 }
 
 /* ---------- baris kiriman ---------- */
-function readRows_(ev, fresh) {
-  const cache = CacheService.getScriptCache();
-  const key = 'rows_' + ev.slug;
-  if (!fresh) {
-    const hit = cache.get(key);
-    if (hit) { try { return JSON.parse(hit); } catch (e) { /* abaikan */ } }
-  }
-  const sh = eventSheet_(ev);
-  const last = sh.getLastRow();
+// Baca `count` baris mulai baris data ke-`start` (1 = kiriman pertama). Tiap hasil membawa nomor barisnya.
+function readRange_(sh, start, count) {
+  const last = sh.getLastRow() - 1;
+  start = Math.max(1, start);
+  count = Math.min(count, last - start + 1);
   const rows = [];
-  if (last >= 2) {
-    const values = sh.getRange(2, 1, last - 1, HEADERS.length).getValues();
-    for (let i = 0; i < values.length; i++) {
-      const v = values[i];
-      if (!v[0]) continue;
-      const r = {};
-      for (let c = 0; c < HEADERS.length; c++) r[HEADERS[c]] = v[c];
-      r.id = String(r.id); r.fileId = String(r.fileId); r.deviceId = String(r.deviceId);
-      r.guest = String(r.guest); r.caption = String(r.caption || ''); r.type = String(r.type);
-      r.source = String(r.source); r.mime = String(r.mime);
-      r.size = Number(r.size) || 0;
-      r.hidden = String(r.hidden).toLowerCase() === 'true';
-      r.createdAt = (r.createdAt instanceof Date) ? r.createdAt.toISOString() : String(r.createdAt);
-      rows.push(r);
-    }
+  if (count <= 0) return rows;
+  const values = sh.getRange(start + 1, 1, count, HEADERS.length).getValues();
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (!v[0]) continue;
+    const r = { row: start + i };
+    for (let c = 0; c < HEADERS.length; c++) r[HEADERS[c]] = v[c];
+    r.id = String(r.id); r.fileId = String(r.fileId); r.deviceId = String(r.deviceId);
+    r.guest = String(r.guest); r.caption = String(r.caption || ''); r.type = String(r.type);
+    r.source = String(r.source); r.mime = String(r.mime);
+    r.size = Number(r.size) || 0; r.duration = Number(r.duration) || 0;
+    r.hidden = String(r.hidden).toLowerCase() === 'true';
+    r.createdAt = (r.createdAt instanceof Date) ? r.createdAt.toISOString() : String(r.createdAt);
+    rows.push(r);
   }
-  try { const s = JSON.stringify(rows); if (s.length < 95000) cache.put(key, s, 15); } catch (e) { /* terlalu besar: tidak apa */ }
   return rows;
 }
-function clearRowsCache_(ev) { CacheService.getScriptCache().remove('rows_' + ev.slug); }
+// Jumlah kiriman di event (cache 20 detik, jadi penyegaran album oleh ribuan tamu tidak membuka Sheet)
+function total_(ev) {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get('n_' + ev.slug);
+  if (hit !== null && hit !== undefined && hit !== '') return Number(hit) || 0;
+  const n = Math.max(0, eventSheet_(ev).getLastRow() - 1);
+  cache.put('n_' + ev.slug, String(n), 20);
+  return n;
+}
+function version_(ev) {
+  const cache = CacheService.getScriptCache();
+  let v = cache.get('v_' + ev.slug);
+  if (!v) { v = prop_('v_' + ev.slug) || '0'; cache.put('v_' + ev.slug, v, CACHE_LONG); }
+  return v;
+}
+function clearRowsCache_(ev) { CacheService.getScriptCache().remove('n_' + ev.slug); }
 function clearCache_() { CacheService.getScriptCache().remove('events'); }
 function findRow_(sh, id) {
   const last = sh.getLastRow();
@@ -599,24 +761,6 @@ function fileInFolder_(fileId, folderId) {
   while (parents.hasNext()) { if (parents.next().getId() === folderId) return file; }
   throw err_('File bukan milik event ini.', 'BAD_REQUEST');
 }
-function visible_(rows) { return rows.filter(function (r) { return !r.hidden; }); }
-function countUsed_(rows, deviceId) {
-  if (!deviceId) return 0;
-  let n = 0;
-  for (let i = 0; i < rows.length; i++) if (rows[i].deviceId === deviceId && rows[i].source === 'camera') n++;
-  return n;
-}
-function counts_(rows) {
-  const guests = {};
-  let photos = 0, videos = 0, bytes = 0;
-  rows.forEach(function (r) {
-    if (r.type === 'video') videos++; else photos++;
-    bytes += r.size;
-    guests[r.deviceId] = true;
-  });
-  return { photos: photos, videos: videos, guests: Object.keys(guests).length, bytes: bytes };
-}
-
 /* ---------- pembersih teks ---------- */
 function cleanId_(v) { return String(v || '').replace(/[^A-Za-z0-9_\-]/g, '').slice(0, 80); }
 // Buang karakter kontrol & awalan rumus (= + - @) supaya aman saat masuk Sheet

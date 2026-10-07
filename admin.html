@@ -130,7 +130,7 @@
                     <label class="field"><span>Sub judul</span><input type="text" name="eventSubtitle" maxlength="80"></label>
                     <label class="field"><span>Tanggal acara</span><input type="date" name="eventDate"></label>
                     <label class="field"><span>Jatah jepretan per tamu</span><input type="number" name="shotsPerGuest" min="1" max="999"></label>
-                    <label class="field"><span>Durasi video maksimal (detik)</span><input type="number" name="maxVideoSeconds" min="3" max="1200"></label>
+                    <label class="field"><span>Total durasi video per tamu (detik)</span><input type="number" name="maxVideoSeconds" min="5" max="3600"></label>
                     <label class="field"><span>Mode album</span>
                         <select name="albumMode">
                             <option value="reveal">Dibuka pada waktu tertentu (kejutan)</option>
@@ -155,7 +155,7 @@
 
         <section class="panel card">
             <h2>Jepretan per Tamu</h2>
-            <p class="sub">Siapa yang paling rajin memotret.</p>
+            <p class="sub">Siapa yang paling rajin memotret (100 teratas), beserta durasi video yang sudah dipakai.</p>
             <ul class="guest-list" id="a-guests"></ul>
         </section>
 
@@ -169,6 +169,7 @@
                 <button type="button" data-f="hidden">Tersembunyi</button>
             </div>
             <div class="grid" id="a-grid"></div>
+            <p style="text-align:center;margin-top:1.4rem"><button class="btn ghost" type="button" id="a-more" hidden>Muat Lebih Banyak</button></p>
             <p class="empty" id="a-empty" hidden>Belum ada kiriman.</p>
         </section>
     </main>

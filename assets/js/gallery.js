@@ -8,14 +8,15 @@
   const el = {
     title: $('#g-title'), date: $('#g-date'), lead: $('#g-lead'), develop: $('#g-develop'), total: $('#g-total'),
     portrait: $('#g-portrait'), photo: $('#g-photo'), cam: $('#g-cam'),
-    tabs: $('#g-tabs'), grid: $('#g-grid'), empty: $('#g-empty'), refresh: $('#g-refresh'), ssBtn: $('#g-slideshow'),
+    tabs: $('#g-tabs'), grid: $('#g-grid'), more: $('#g-more'), empty: $('#g-empty'), refresh: $('#g-refresh'), ssBtn: $('#g-slideshow'),
     lb: $('#lb'), lbStage: $('#lb-stage'), lbWho: $('#lb-who'), lbWhen: $('#lb-when'), lbDl: $('#lb-dl'),
     ss: $('#ss'), ssA: $('#ss-a'), ssB: $('#ss-b'), ssWho: $('#ss-who'), ssBrand: $('#ss-brand')
   };
-  const POLL_MS = 10000;
+  const POLL_MS = 15000 + Math.floor(Math.random() * 5000);   // tiap HP sedikit berbeda, supaya ribuan tamu tidak bertanya ke server di detik yang sama
+  const PAGE = 60;
   const state = {
     items: [], local: [], localUrls: {}, tiles: {}, filter: 'all', view: [], index: 0, first: true,
-    revealAt: null, revealed: false, settings: {}, cover: '',
+    revealAt: null, revealed: false, settings: {}, cover: '', cursor: 0, floor: 1, more: false, v: null, own: false, total: 0, busyMore: false,
     cdTimer: null, pollTimer: null, loading: false, ssTimer: null, ssIndex: 0, ssFlip: false
   };
 
@@ -35,6 +36,35 @@
   }
   function localFor(fileId) { for (let i = 0; i < state.local.length; i++) if (state.local[i].fileId === fileId) return state.local[i]; return null; }
 
+  function paintHeader(r) {
+    const s = r.settings || {};
+    state.settings = s;
+    state.revealed = !!r.revealed || !!r.admin;
+    state.own = !!r.own;
+    state.revealAt = s.revealAt;
+    if (typeof r.total === 'number') state.total = r.total;
+    const title = s.eventTitle || '';
+    el.title.textContent = title; el.ssBrand.textContent = title; document.title = 'Album — ' + title;
+    el.date.textContent = WC.fmtDateLine(s.eventDate);
+    if (s.coverFileId && s.coverFileId !== state.cover) {
+      state.cover = s.coverFileId; el.portrait.hidden = false;
+      WC.loadThumb(el.photo, s.coverFileId, 300);
+    }
+    const sum = state.total.toLocaleString('id-ID') + ' kiriman';
+    if (state.revealed) {
+      el.develop.hidden = true; el.tabs.hidden = false; el.ssBtn.hidden = false;
+      el.lead.innerHTML = '<span class="live-dot"></span>' + WC.esc(r.admin && !r.revealed ? 'Mode admin: album belum dibuka untuk tamu. ' + sum : sum);
+      stopCountdown();
+    } else {
+      el.develop.hidden = false; el.tabs.hidden = true; el.ssBtn.hidden = true;
+      el.lead.textContent = s.guestsSeeOwn ? 'Sambil menunggu, ini jepretanmu sendiri.' : 'Sabar ya, semua foto dibuka bersamaan.';
+      el.total.textContent = 'Sudah terkumpul ' + sum + '.';
+      startCountdown();
+    }
+    el.more.hidden = !(state.revealed && state.more);
+  }
+
+  // Muat dari awal: halaman pertama = kiriman terbaru
   async function load(quiet) {
     if (state.loading) return;
     state.loading = true;
@@ -42,36 +72,59 @@
     try {
       if (!WC.event) throw Object.assign(new Error('Link belum lengkap. Silakan scan ulang kode QR dari mempelai.'), { code: 'NO_EVENT' });
       await WC.queue.load(true);
-      const got = await Promise.all([WC.api('list', { pin: WC.pin() || undefined }), loadLocal()]);
-      const r = got[0], s = r.settings || {};
-      state.items = r.items || []; state.settings = s;
-      state.revealed = !!r.revealed || !!r.admin;
-      state.revealAt = s.revealAt;
-      const title = s.eventTitle || '';
-      el.title.textContent = title; el.ssBrand.textContent = title; document.title = 'Album — ' + title;
-      el.date.textContent = WC.fmtDateLine(s.eventDate);
-      if (s.coverFileId && s.coverFileId !== state.cover) {
-        state.cover = s.coverFileId; el.portrait.hidden = false;
-        WC.loadThumb(el.photo, s.coverFileId, 300);
-      }
-      const c = r.counts || { photos: 0, videos: 0, guests: 0 };
-      const sum = c.photos + ' foto · ' + c.videos + ' video · dari ' + c.guests + ' tamu';
-      if (state.revealed) {
-        el.develop.hidden = true; el.tabs.hidden = false; el.ssBtn.hidden = false;
-        el.lead.innerHTML = '<span class="live-dot"></span>' + WC.esc(r.admin && !r.revealed ? 'Mode admin: album belum dibuka untuk tamu. ' + sum : sum);
-        stopCountdown();
-      } else {
-        el.develop.hidden = false; el.tabs.hidden = true; el.ssBtn.hidden = true;
-        el.lead.textContent = s.guestsSeeOwn ? 'Sambil menunggu, ini jepretanmu sendiri.' : 'Sabar ya, semua foto dibuka bersamaan.';
-        el.total.textContent = 'Sudah terkumpul ' + sum + '.';
-        startCountdown();
-      }
+      const got = await Promise.all([WC.api('list', { pin: WC.pin() || undefined, mode: 'tail', limit: PAGE }), loadLocal()]);
+      const r = got[0];
+      state.items = r.items || [];
+      state.cursor = r.cursor || 0; state.floor = r.floor || 1; state.more = !!r.more; state.v = r.v;
+      paintHeader(r);
       render();
     } catch (e) {
       if (!quiet || e.code === 'NO_EVENT') el.lead.textContent = e.code === 'NO_EVENT' ? e.message : 'Album belum bisa dimuat: ' + e.message;
       if (e.code === 'NO_EVENT') stopPolling();
     }
     state.loading = false;
+  }
+
+  // Penyegaran ringan: hanya menanyakan kiriman SETELAH yang sudah dimiliki
+  async function poll() {
+    if (state.loading || !WC.event) return;
+    if (state.own || !state.revealed) { await loadLocal(); render(); return; }       // album terkunci: tidak perlu bertanya ke server
+    state.loading = true;
+    try {
+      const got = await Promise.all([WC.api('list', { pin: WC.pin() || undefined, mode: 'after', after: state.cursor }), loadLocal(), WC.queue.load(true)]);
+      const r = got[0];
+      if (r.v !== state.v || !!r.own !== state.own) { state.loading = false; return load(true); }   // ada yang disembunyikan/dihapus, atau status album berubah
+      if (r.items && r.items.length) {
+        const have = {};
+        state.items.forEach(function (it) { have[it.id] = true; });
+        state.items = r.items.filter(function (it) { return !have[it.id]; }).concat(state.items);
+      }
+      if (typeof r.cursor === 'number') state.cursor = Math.max(state.cursor, r.cursor);
+      paintHeader(r);
+      render();
+    } catch (e) { /* diam: dicoba lagi pada putaran berikutnya */ }
+    state.loading = false;
+  }
+
+  // "Muat lebih banyak": halaman berikutnya yang lebih lama
+  async function loadMore() {
+    if (state.busyMore || !state.more || !state.revealed) return;
+    state.busyMore = true; el.more.disabled = true; el.more.textContent = 'Memuat…';
+    try {
+      const r = await WC.api('list', { pin: WC.pin() || undefined, mode: 'before', before: state.floor, limit: PAGE });
+      if (r.v !== state.v) { state.busyMore = false; el.more.disabled = false; el.more.textContent = 'Muat Lebih Banyak'; return load(true); }
+      const have = {};
+      state.items.forEach(function (it) { have[it.id] = true; });
+      state.items = state.items.concat((r.items || []).filter(function (it) { return !have[it.id]; }));
+      state.floor = r.floor || 1; state.more = !!r.more;
+      el.more.hidden = !state.more;
+      render();
+    } catch (e) { WC.toast('Belum bisa memuat: ' + e.message); }
+    state.busyMore = false; el.more.disabled = false; el.more.textContent = 'Muat Lebih Banyak';
+  }
+  el.more.addEventListener('click', loadMore);
+  if ('IntersectionObserver' in window) {        // otomatis memuat saat tombolnya terlihat
+    new IntersectionObserver(function (en) { if (en[0].isIntersecting) loadMore(); }, { rootMargin: '600px' }).observe(el.more);
   }
 
   /* ---------- daftar yang ditampilkan ---------- */
@@ -144,11 +197,11 @@
   el.refresh.addEventListener('click', function () { load(); });
 
   /* ---------- segarkan otomatis ---------- */
-  function startPolling() { stopPolling(); state.pollTimer = setInterval(function () { if (!document.hidden) load(true); }, POLL_MS); }
+  function startPolling() { stopPolling(); state.pollTimer = setInterval(function () { if (!document.hidden) poll(); }, POLL_MS); }
   function stopPolling() { clearInterval(state.pollTimer); state.pollTimer = null; }
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) load(true); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
   // jepretan yang baru selesai terkirim dari HP ini: langsung perbarui
-  WC.queue.on(function (type, item) { if (item.meta.event === WC.event && (type === 'done' || type === 'rejected')) load(true); });
+  WC.queue.on(function (type, item) { if (item.meta.event === WC.event && (type === 'done' || type === 'rejected')) { if (state.own || !state.revealed) load(true); else poll(); } });
 
   /* ---------- hitung mundur ---------- */
   function startCountdown() {

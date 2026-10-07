@@ -7,7 +7,7 @@
   const $ = WC.$;
   const el = {
     welcome: $('#welcome'), cam: $('#cam'), form: $('#w-form'), name: $('#w-name'), start: $('#w-start'),
-    wErr: $('#w-error'), wClosed: $('#w-closed'), wShots: $('#w-shots'), wReveal: $('#w-reveal'), wTitle: $('#w-title'), wSub: $('#w-sub'), wInvite: $('#w-invite'), wDate: $('#w-date'), wPhoto: $('#w-photo'), wMono: $('#w-mono'), wAlbum: $('#w-album'), cAlbum: $('#c-album'), coach: $('#c-coach'), lastLink: $('#c-last-link'),
+    wErr: $('#w-error'), wClosed: $('#w-closed'), wShots: $('#w-shots'), wVideo: $('#w-video'), wReveal: $('#w-reveal'), wTitle: $('#w-title'), wSub: $('#w-sub'), wInvite: $('#w-invite'), wDate: $('#w-date'), wPhoto: $('#w-photo'), wMono: $('#w-mono'), wAlbum: $('#w-album'), cAlbum: $('#c-album'), coach: $('#c-coach'), lastLink: $('#c-last-link'),
     video: $('#c-video'), counter: $('#c-counter'), brand: $('#c-brand'), stamp: $('#c-stamp'),
     rec: $('#c-rec'), recTime: $('#c-rec-time'), last: $('#c-last'), flash: $('#c-flash'), shut: $('#c-shut'),
     msg: $('#c-msg'), msgText: $('#c-msg-text'), native: $('#c-native'), retry: $('#c-retry'),
@@ -18,7 +18,7 @@
 
   const state = {
     settings: { shotsPerGuest: 27, allowVideo: true, maxVideoSeconds: 15, allowLibrary: true, cameraOpen: true, dateStamp: true, guestsSeeOwn: true },
-    used: 0, stream: null, cover: '', facing: 'environment', mode: 'photo', flashOn: false,
+    used: 0, usedVideo: 0, stream: null, cover: '', facing: 'environment', mode: 'photo', flashOn: false,
     filter: 'klasik', busy: false, recorder: null, recTimer: null, recStart: 0, libActive: 0, lastUrl: null, ready: false
   };
 
@@ -39,6 +39,8 @@
       WC.loadThumb(el.wPhoto, st.coverFileId, 600);
     }
     el.wShots.textContent = st.shotsPerGuest;
+    const hasVideo = st.allowVideo && typeof MediaRecorder !== 'undefined';
+    el.wVideo.textContent = hasVideo ? ' dan total ' + human(st.maxVideoSeconds) + ' video' : '';
     if (st.albumMode === 'live') el.wReveal.textContent = 'Hasil jepretanmu langsung masuk ke album bersama.';
     else {
       const t = new Date(st.revealAt);
@@ -61,10 +63,9 @@
     }
     try {
       const r = await WC.api('config');
-      state.used = r.used || 0; state.ready = true;
+      state.used = r.used || 0; state.usedVideo = r.usedVideo || 0; state.ready = true;
       applySettings(r.settings);
       el.wErr.hidden = true;
-      WC.prewarm();                       // siapkan tiket upload dari sekarang
     } catch (e) {
       el.wErr.hidden = false;
       if (e.code === 'NO_EVENT') { el.form.hidden = true; el.wErr.textContent = e.message; return; }
@@ -82,7 +83,6 @@
     el.welcome.hidden = true; el.cam.hidden = false;
     unlockAudio();
     startCamera();
-    WC.prewarm();
     updateCounter(); updateStatus();
     setTimeout(showCoach, 1200);
   });
@@ -141,6 +141,7 @@
       el.shutter.classList.toggle('video', state.mode === 'video');
       el.shutter.setAttribute('aria-label', state.mode === 'video' ? 'Rekam video' : 'Jepret');
       paintPreview();
+      updateCounter(); updateStatus();
       startCamera();
     });
   });
@@ -171,12 +172,28 @@
   });
 
   /* ---------- hitungan sisa film ---------- */
-  function pending() { return WC.queue.pending(WC.event, 'camera'); }
-  function remaining() { return Math.max(0, Number(state.settings.shotsPerGuest) - state.used - pending()); }
+  function queued(type) {
+    return (WC.queue.items || []).filter(function (i) { return i.meta.event === WC.event && i.meta.source === 'camera' && (!type || i.meta.type === type); });
+  }
+  function pending() { return queued().length; }
+  // Foto: jatah jepretan. Video: jatah TOTAL detik per tamu (boleh dipecah jadi beberapa video).
+  function remaining() { return Math.max(0, Number(state.settings.shotsPerGuest) - state.used - queued('photo').length); }
+  function remainingVideo() {
+    const waiting = queued('video').reduce(function (a, i) { return a + (Number(i.meta.duration) || 0); }, 0);
+    return Math.max(0, Number(state.settings.maxVideoSeconds) - state.usedVideo - waiting);
+  }
+  function clock(sec) { sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
+  function human(sec) { sec = Math.max(0, Math.round(Number(sec) || 0)); return sec >= 60 ? (sec % 60 ? clock(sec) + ' menit' : (sec / 60) + ' menit') : sec + ' detik'; }
   function updateCounter() {
-    const r = remaining();
-    el.counter.innerHTML = String(r).padStart(2, '0') + '<small>SISA</small>';
-    if (!state.recorder) el.shutter.disabled = r <= 0;
+    if (state.mode === 'video') {
+      const v = remainingVideo();
+      el.counter.innerHTML = clock(v) + '<small>VIDEO</small>';
+      if (!state.recorder) el.shutter.disabled = v < 1;
+    } else {
+      const r = remaining();
+      el.counter.innerHTML = String(r).padStart(2, '0') + '<small>SISA</small>';
+      el.shutter.disabled = r <= 0;
+    }
   }
   function updateStatus(progress) {
     const parts = [];
@@ -187,7 +204,8 @@
     if (waiting > 0 && WC.queue.lastError) parts.push('tertunda: ' + WC.queue.lastError + ' Dicoba lagi otomatis, atau ketuk di sini.');
     el.status.classList.toggle('has-issue', waiting > 0);
     if (state.libActive > 0) parts.push('mengirim ' + state.libActive + ' file dari galeri');
-    if (!parts.length && remaining() <= 0) parts.push('Rol film habis. Terima kasih sudah mengabadikan momen kami!');
+    if (!parts.length && state.mode !== 'video' && remaining() <= 0) parts.push('Rol film habis. Terima kasih sudah mengabadikan momen kami!');
+    if (!parts.length && state.mode === 'video' && remainingVideo() < 1 && !state.recorder) parts.push('Jatah durasi videomu sudah habis.');
     let html = WC.esc(parts.join(' · '));
     if (typeof progress === 'number') html += '<span class="bar"><i style="width:' + Math.round(progress * 100) + '%"></i></span>';
     el.status.innerHTML = html;
@@ -262,8 +280,10 @@
     state.busy = false;
   }
 
-  async function enqueue(blob, type, thumb) {
-    const item = await WC.queue.add(blob, { event: WC.event, source: 'camera', type: type, guest: WC.guestName() });
+  async function enqueue(blob, type, thumb, duration) {
+    const meta = { event: WC.event, source: 'camera', type: type, guest: WC.guestName() };
+    if (type === 'video') meta.duration = Math.round((Number(duration) || 0) * 10) / 10;
+    const item = await WC.queue.add(blob, meta);
     WC.thumbs.add(item.id, WC.event, thumb || null, type);       // salinan kecil: langsung tampil di album
     updateCounter(); updateStatus();
     if (!state.coachedAfterShot) { state.coachedAfterShot = true; setTimeout(showCoach, 900); }
@@ -283,9 +303,9 @@
     for (let i = 0; i < list.length; i++) { try { if (MediaRecorder.isTypeSupported(list[i])) return list[i]; } catch (e) { /* lanjut */ } }
     return '';
   }
-  function clock(sec) { sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
   function startRecording() {
-    if (remaining() <= 0) { WC.toast('Rol film kamu sudah habis.'); return; }
+    const max = Math.floor(remainingVideo());
+    if (max < 1) { WC.toast('Jatah durasi videomu sudah habis.'); return; }
     if (!state.stream) { WC.toast('Kamera belum siap.'); return; }
     const mime = pickVideoMime();
     // Rekam lewat filter: gambar kamera diolah dulu, hasil olahannya yang direkam (suara tetap dari mikrofon)
@@ -317,14 +337,14 @@
           else { const v = el.video; if (v.videoWidth) poster = WCFilm.thumbBlob(WCFilm.frameToCanvas(v, v.videoWidth, v.videoHeight, {})); }
         } catch (e) { /* tanpa sampul */ }
         endVfx();
-        poster.then(function (t) { return enqueue(blob, 'video', t); }, function () { return enqueue(blob, 'video'); })
+        const took = Math.min(max, (Date.now() - state.recStart) / 1000);
+        poster.then(function (t) { return enqueue(blob, 'video', t, took); }, function () { return enqueue(blob, 'video', null, took); })
           .then(function () { WC.toast('Video tersimpan di rol.'); });
       }
       endVfx();
       updateCounter();
     };
     state.recorder = rec; state.recStart = Date.now();
-    const max = Number(state.settings.maxVideoSeconds) || 15;
     el.rec.hidden = false; el.shutter.classList.add('recording');
     state.recTimer = setInterval(function () {
       const sec = (Date.now() - state.recStart) / 1000;
@@ -391,10 +411,13 @@
   /* ---------- antrean kirim (jalan di latar, 3 sekaligus; lihat common.js) ---------- */
   WC.queue.on(function (type, item, extra) {
     if (item.meta.event !== WC.event) return;
-    if (type === 'done' && extra && typeof extra.used === 'number') state.used = Math.max(state.used, extra.used);
+    if (type === 'done' && extra) {
+      if (typeof extra.used === 'number') state.used = Math.max(state.used, extra.used);
+      if (typeof extra.usedVideo === 'number') state.usedVideo = Math.max(state.usedVideo, extra.usedVideo);
+    }
     if (type === 'rejected') {
       WC.toast(extra.message, 4000);
-      if (extra.code === 'LIMIT') state.used = Number(state.settings.shotsPerGuest);
+      if (extra.code === 'LIMIT') { if (item.meta.type === 'video') state.usedVideo = Number(state.settings.maxVideoSeconds); else state.used = Number(state.settings.shotsPerGuest); }
       if (extra.code === 'CLOSED') { state.settings.cameraOpen = false; }
     }
     updateCounter(); updateStatus();

@@ -13,9 +13,9 @@
     qr: $('#a-qr'), qrUrl: $('#a-qr-url'), qrTitle: $('#qr-title'), print: $('#a-print'), copy: $('#a-copy'),
     coverImg: $('#a-cover-img'), coverMono: $('#a-cover-mono'), coverBtn: $('#a-cover-btn'), coverDel: $('#a-cover-del'), coverInput: $('#a-cover-input'),
     form: $('#a-settings'), save: $('#a-save'), fName: $('#f-name'), fPin: $('#f-pin'), clientHint: $('#a-client-hint'), danger: $('#a-danger'), delEvent: $('#a-delete-event'),
-    guests: $('#a-guests'), tabs: $('#a-tabs'), grid: $('#a-grid'), empty: $('#a-empty')
+    guests: $('#a-guests'), tabs: $('#a-tabs'), grid: $('#a-grid'), empty: $('#a-empty'), more: $('#a-more')
   };
-  const state = { role: '', settings: {}, items: [], revealed: false, filter: 'all', cover: null };
+  const state = { role: '', settings: {}, items: [], guests: [], revealed: false, filter: 'all', cover: null, floor: 1, more: false };
   const base = new URL('.', location.href).href;            // folder tempat aplikasi berada
   function guestUrl() { return base + '?e=' + encodeURIComponent(WC.event); }
   function adminUrl() { return base + 'admin.html?e=' + encodeURIComponent(WC.event); }
@@ -102,12 +102,15 @@
 
   async function load() {
     try {
-      const r = await admin('list');
+      // halaman pertama kiriman (terbaru) + statistik lengkap, diminta bersamaan
+      const got = await Promise.all([admin('list', { mode: 'tail', limit: 60 }), admin('adminStats')]);
+      const r = got[0], st = got[1];
       if (!r.admin) throw Object.assign(new Error('Sesi habis, silakan masuk lagi.'), { code: 'AUTH' });
       state.settings = r.settings; state.items = r.items || []; state.revealed = r.revealed;
-      const c = r.counts;
-      $('#s-photos').textContent = c.photos; $('#s-videos').textContent = c.videos;
-      $('#s-guests').textContent = c.guests; $('#s-size').textContent = WC.fmtBytes(c.bytes);
+      state.floor = r.floor || 1; state.more = !!r.more; state.guests = st.guests || [];
+      const c = st.counts;
+      $('#s-photos').textContent = c.photos.toLocaleString('id-ID'); $('#s-videos').textContent = c.videos.toLocaleString('id-ID');
+      $('#s-guests').textContent = c.guests.toLocaleString('id-ID'); $('#s-size').textContent = WC.fmtBytes(c.bytes);
       el.drive.href = r.folderUrl; el.sheet.href = r.sheetUrl;
       paintStatus(); fillForm(); renderGuests(); renderGrid();
     } catch (e) {
@@ -116,6 +119,15 @@
       WC.toast('Gagal memuat: ' + e.message, 4000);
     }
   }
+  el.more.addEventListener('click', async function () {
+    el.more.disabled = true;
+    try {
+      const r = await admin('list', { mode: 'before', before: state.floor, limit: 60 });
+      state.items = state.items.concat(r.items || []); state.floor = r.floor || 1; state.more = !!r.more;
+      renderGrid();
+    } catch (e) { WC.toast('Gagal memuat: ' + e.message, 4000); }
+    el.more.disabled = false;
+  });
 
   function paintStatus() {
     const s = state.settings;
@@ -267,14 +279,10 @@
 
   /* ---------- daftar tamu ---------- */
   function renderGuests() {
-    const map = {};
-    state.items.forEach(function (it) {
-      const k = it.deviceId || it.guest;
-      map[k] = map[k] || { name: it.guest, n: 0 };
-      map[k].n++; map[k].name = it.guest || map[k].name;
-    });
-    const list = Object.keys(map).map(function (k) { return map[k]; }).sort(function (a, b) { return b.n - a.n; });
-    el.guests.innerHTML = list.length ? list.map(function (g) { return '<li><span>' + WC.esc(g.name) + '</span><b>' + g.n + '</b></li>'; }).join('') : '<li><span>Belum ada kiriman.</span></li>';
+    const list = state.guests;
+    el.guests.innerHTML = list.length ? list.map(function (g) {
+      return '<li><span>' + WC.esc(g.name) + '</span><b>' + g.n + (g.sec ? ' · video ' + Math.round(g.sec) + ' dtk' : '') + '</b></li>';
+    }).join('') : '<li><span>Belum ada kiriman.</span></li>';
   }
 
   /* ---------- semua kiriman ---------- */
@@ -320,6 +328,7 @@
       el.grid.appendChild(wrap);
     });
     el.empty.hidden = view.length > 0;
+    el.more.hidden = !state.more;
   }
   WC.$$('button', el.tabs).forEach(function (b) {
     b.addEventListener('click', function () {
