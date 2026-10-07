@@ -12,7 +12,9 @@
  *   - Foto & video pendek dikirim lewat script ini langsung ke Drive (DriveApp),
  *     jadi TIDAK memakai jatah "URL Fetch 20.000/hari".
  *   - Hanya file besar (video panjang / upload galeri) yang memakai tiket upload (1 UrlFetch per file).
- *   - Daftar album dibaca per halaman, dan hampir semua bacaan lewat cache,
+ *   - Album tamu membaca daftar foto LANGSUNG dari Google Drive (pakai API key di config.js),
+ *     jadi tidak memakai jalur script sama sekali. Script hanya memberi tahu ID foldernya saat album sudah dibuka.
+ *   - Kalau API key tidak ada, daftar album dibaca per halaman lewat script, dan hampir semua bacaan lewat cache,
  *     supaya 1.000 tamu tidak membuat Sheet dibaca utuh berulang-ulang.
  *
  *  LANGKAH PAKAI (detail di PANDUAN.md):
@@ -33,6 +35,7 @@ const EVENT_HEADERS = ['slug', 'name', 'folderId', 'sheetName', 'settings', 'cre
 const HEADERS = ['id', 'fileId', 'type', 'mime', 'size', 'guest', 'deviceId', 'source', 'caption', 'createdAt', 'hidden', 'duration'];
 const SMALL_MAX = 8 * 1024 * 1024;   // file sampai ukuran ini dikirim lewat script (tanpa memakai jatah UrlFetch)
 const CACHE_LONG = 21600;            // 6 jam (maksimum CacheService)
+const HIDDEN_FOLDER = '_tersembunyi'; // sub-folder untuk kiriman yang disembunyikan admin (tidak ikut terbaca album)
 
 // Pengaturan awal setiap event baru. Semuanya bisa diubah dari dashboard.
 const DEFAULT_SETTINGS = {
@@ -104,7 +107,7 @@ function setup() {
  *  PINTU MASUK WEB APP
  * ------------------------------------------------------------ */
 function doGet() {
-  return json_({ ok: true, app: 'disposable-camera', version: 4, ready: isReady_(), time: new Date().toISOString() });
+  return json_({ ok: true, app: 'disposable-camera', version: 5, ready: isReady_(), time: new Date().toISOString() });
 }
 
 function doPost(e) {
@@ -132,9 +135,16 @@ function doPost(e) {
 function actConfig_(d) {
   const ev = getEvent_(d.event);
   const st = deviceState_(ev, cleanId_(d.deviceId));
+  const admin = !!role_(d, ev);
+  const revealed = isRevealed_(ev.settings);
   return {
     settings: publicSettings_(ev),
-    revealed: isRevealed_(ev.settings),
+    revealed: revealed,
+    admin: admin,
+    v: version_(ev),
+    // ID folder Drive hanya diberikan kalau album memang sudah boleh dilihat (atau kepada admin).
+    // Dengan ID ini HP tamu membaca daftar foto langsung dari Google Drive.
+    folderId: (revealed || admin) ? ev.folderId : '',
     serverTime: new Date().toISOString(),
     used: st.p,
     usedVideo: st.s,
@@ -169,6 +179,11 @@ function admit_(ev, d) {
   }
   return { admin: admin, source: source, mime: mime, isVideo: isVideo, deviceId: deviceId, duration: duration };
 }
+// Keterangan singkat yang ditempel di file Drive, supaya album bisa menampilkan nama tamu tanpa bertanya ke script.
+// Sengaja TIDAK memuat ID HP tamu.
+function describe_(a, d) {
+  return JSON.stringify({ g: cleanText_(d.guest, 40) || 'Tamu', s: a.source === 'library' ? 'library' : 'camera', t: Math.round((a.duration || 0) * 10) / 10 });
+}
 function fileName_(a, d) {
   if (a.source === 'cover') return '_sampul_' + Utilities.getUuid().slice(0, 6) + '.' + extFor_(a.mime);
   return Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyyMMdd-HHmmss') + '_' + (safeName_(d.guest) || 'Tamu') + '_' + Utilities.getUuid().slice(0, 6) + '.' + extFor_(a.mime);
@@ -198,6 +213,7 @@ function actUpload_(d) {
   if (!bytes.length) throw err_('File kosong.', 'BAD_REQUEST');
   if (bytes.length > SMALL_MAX) throw err_('File terlalu besar untuk jalur ini.', 'BAD_REQUEST');
   const file = DriveApp.getFolderById(ev.folderId).createFile(Utilities.newBlob(bytes, a.mime, fileName_(a, d)));
+  try { file.setDescription(describe_(a, d)); } catch (e) { /* tidak fatal: album memakai nama dari nama file */ }
   const out = record_(ev, d, a, file.getId(), bytes.length);
   remember_(d.uid, out);
   return out;
@@ -216,7 +232,7 @@ function actInitUpload_(d) {
     method: 'post',
     contentType: 'application/json; charset=UTF-8',
     headers: headers,
-    payload: JSON.stringify({ name: fileName_(a, d), mimeType: a.mime, parents: [ev.folderId] }),
+    payload: JSON.stringify({ name: fileName_(a, d), mimeType: a.mime, parents: [ev.folderId], description: a.source === 'cover' ? '' : describe_(a, d) }),
     muteHttpExceptions: true
   });
   if (res.getResponseCode() !== 200) throw err_('Drive menolak membuat sesi upload (' + res.getResponseCode() + '): ' + res.getContentText().slice(0, 200), 'DRIVE');
@@ -325,7 +341,8 @@ function actList_(d) {
     settings: role === 'master' ? fullSettings_(ev) : publicSettings_(ev),
     revealed: revealed, admin: admin, role: role || '',
     serverTime: new Date().toISOString(),
-    v: version_(ev), items: []
+    v: version_(ev), items: [],
+    folderId: (revealed || admin) ? ev.folderId : ''
   };
   const limit = clamp_(d.limit || 60, 1, 200);
   const mode = d.mode === 'after' || d.mode === 'before' ? d.mode : 'tail';
@@ -559,6 +576,12 @@ function actAdminSetHidden_(d) {
     const rowNo = findRow_(sh, d.id);
     sh.getRange(rowNo, HEADERS.indexOf('hidden') + 1).setValue(String(!!d.hidden));
     const dev = String(sh.getRange(rowNo, HEADERS.indexOf('deviceId') + 1).getValue());
+    // Pindahkan file: disembunyikan -> sub-folder tersembunyi, ditampilkan -> kembali ke folder event.
+    // Album tamu membaca isi folder event langsung dari Drive, jadi inilah yang membuatnya hilang/muncul.
+    try {
+      const file = DriveApp.getFileById(String(sh.getRange(rowNo, HEADERS.indexOf('fileId') + 1).getValue()));
+      file.moveTo(d.hidden ? hiddenFolder_(ev) : DriveApp.getFolderById(ev.folderId));
+    } catch (e) { /* file sudah tidak ada */ }
     touched_(ev, dev);
     return {};
   } finally { lock.releaseLock(); }
@@ -754,6 +777,32 @@ function findRow_(sh, id) {
   }
   throw err_('Data tidak ditemukan.', 'BAD_REQUEST');
 }
+function hiddenFolder_(ev) {
+  const parent = DriveApp.getFolderById(ev.folderId);
+  const it = parent.getFoldersByName(HIDDEN_FOLDER);
+  return it.hasNext() ? it.next() : parent.createFolder(HIDDEN_FOLDER);
+}
+
+/* OPSIONAL — jalankan manual SATU KALI kalau sudah ada kiriman dari versi sebelumnya:
+ * menempelkan nama tamu ke tiap file Drive dan memindahkan yang berstatus tersembunyi ke sub-folder.
+ * Aman dijalankan ulang. Untuk event yang masih kosong tidak perlu. */
+function syncDrive() {
+  readEvents_(true).forEach(function (ev) {
+    const sh = ss_().getSheetByName(ev.sheetName);
+    if (!sh) return;
+    let done = 0;
+    readRange_(sh, 1, 1e9).forEach(function (r) {
+      try {
+        const f = DriveApp.getFileById(r.fileId);
+        if (!f.getDescription()) f.setDescription(JSON.stringify({ g: r.guest, s: r.source, t: r.duration }));
+        if (r.hidden) f.moveTo(hiddenFolder_(ev));
+        done++;
+      } catch (e) { /* file sudah dihapus: lewati */ }
+    });
+    Logger.log(ev.name + ': ' + done + ' file diselaraskan');
+  });
+}
+
 function fileInFolder_(fileId, folderId) {
   let file;
   try { file = DriveApp.getFileById(fileId); } catch (e) { throw err_('File tidak ditemukan di Drive.', 'BAD_REQUEST'); }

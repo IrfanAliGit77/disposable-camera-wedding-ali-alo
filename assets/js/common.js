@@ -86,6 +86,61 @@
   };
   WC.previewUrl = function (fileId) { return 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/preview'; };
 
+  /* ---------- baca daftar album LANGSUNG dari Google Drive ----------
+     Memakai API key (config.js) dan ID folder event. Tidak lewat Apps Script,
+     jadi ribuan tamu boleh membuka album tanpa memakan jalur kiriman foto. */
+  WC.driveReady = function () { return !!C.DRIVE_API_KEY; };
+  function guestFromName(name) {            // cadangan untuk file lama: 20261225-101500_Dinda-Raka_ab12cd.jpg -> "Dinda Raka"
+    const m = /^\d{8}-\d{6}_(.+)_[0-9a-f]{6}\.[A-Za-z0-9]+$/.exec(String(name || ''));
+    return m ? m[1].replace(/-/g, ' ') : 'Tamu';
+  }
+  WC.driveList = async function (folderId, opts) {
+    opts = opts || {};
+    const q = "'" + folderId + "' in parents and trashed = false and (mimeType contains 'image/' or mimeType contains 'video/') and not name contains '_sampul'";
+    const url = 'https://www.googleapis.com/drive/v3/files?orderBy=createdTime%20desc' +
+      '&pageSize=' + (opts.pageSize || 60) +
+      '&fields=' + encodeURIComponent('nextPageToken,files(id,name,mimeType,createdTime,size,description)') +
+      '&q=' + encodeURIComponent(q) +
+      (opts.pageToken ? '&pageToken=' + encodeURIComponent(opts.pageToken) : '') +
+      '&key=' + encodeURIComponent(C.DRIVE_API_KEY);
+    const ctl = window.AbortController ? new AbortController() : null;
+    const timer = ctl ? setTimeout(function () { ctl.abort(); }, 20000) : null;
+    let res;
+    try { res = await fetch(url, { signal: ctl ? ctl.signal : undefined }); }
+    catch (e) { throw Object.assign(new Error('Tidak ada koneksi internet.'), { code: 'NETWORK' }); }
+    finally { clearTimeout(timer); }
+    if (!res.ok) {
+      // 403/400 = API key salah, dibatasi, atau Drive API belum diaktifkan; 429 = terlalu ramai
+      throw Object.assign(new Error('Drive menolak (' + res.status + ').'), { code: res.status === 429 ? 'BUSY' : 'DRIVE', status: res.status });
+    }
+    const j = await res.json();
+    return {
+      next: j.nextPageToken || '',
+      items: (j.files || []).map(function (f) {
+        let meta = {};
+        try { meta = JSON.parse(f.description || '{}') || {}; } catch (e) { meta = {}; }
+        return {
+          id: f.id, fileId: f.id, type: String(f.mimeType || '').indexOf('video/') === 0 ? 'video' : 'photo',
+          guest: meta.g || guestFromName(f.name), source: meta.s || 'camera', duration: Number(meta.t) || 0,
+          createdAt: f.createdTime, size: Number(f.size) || 0, mine: WC.mine.has(WC.event, f.id)
+        };
+      })
+    };
+  };
+
+  /* ---------- daftar kiriman milik HP ini (untuk tab "Jepretanku") ---------- */
+  WC.mine = {
+    all: function (ev) { try { return JSON.parse(store('wc_mine_' + ev) || '[]'); } catch (e) { return []; } },
+    has: function (ev, id) { return WC.mine.all(ev).indexOf(id) >= 0; },
+    add: function (ev, id) {
+      if (!ev || !id) return;
+      const list = WC.mine.all(ev);
+      if (list.indexOf(id) >= 0) return;
+      list.push(id);
+      store('wc_mine_' + ev, JSON.stringify(list.slice(-600)));
+    }
+  };
+
   // Gambar Drive kadang belum siap sesaat setelah upload: coba ulang cepat, bergantian antara dua alamat
   WC.loadThumb = function (img, fileId, width) {
     let tries = 0;
@@ -277,10 +332,13 @@
       const data = await toBase64(blob);
       const r = await WC.api('upload', Object.assign({ mime: blob.type || 'image/jpeg', data: data }, base), { timeout: 120000 });
       if (onProgress) onProgress(1);
+      if (r.item) WC.mine.add(ev, r.item.fileId);
       return r;
     }
     const fileId = await WC.uploadFile(blob, meta, onProgress, key);
-    return WC.api('completeUpload', Object.assign({ fileId: fileId }, base));
+    const r2 = await WC.api('completeUpload', Object.assign({ fileId: fileId }, base));
+    if (meta.source !== 'cover') WC.mine.add(ev, fileId);
+    return r2;
   };
 
   /* ============================================================

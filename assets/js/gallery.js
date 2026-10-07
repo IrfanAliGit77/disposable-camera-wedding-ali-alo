@@ -16,7 +16,7 @@
   const PAGE = 60;
   const state = {
     items: [], local: [], localUrls: {}, tiles: {}, filter: 'all', view: [], index: 0, first: true,
-    revealAt: null, revealed: false, settings: {}, cover: '', cursor: 0, floor: 1, more: false, v: null, own: false, total: 0, busyMore: false,
+    revealAt: null, revealed: false, settings: {}, cover: '', cursor: 0, floor: 1, more: false, v: null, own: false, total: 0, busyMore: false, drive: false, driveOff: false, folderId: '', next: '', polls: 0,
     cdTimer: null, pollTimer: null, loading: false, ssTimer: null, ssIndex: 0, ssFlip: false
   };
 
@@ -51,9 +51,10 @@
       WC.loadThumb(el.photo, s.coverFileId, 300);
     }
     const sum = state.total.toLocaleString('id-ID') + ' kiriman';
+    state.adminPreview = !!(r.admin && !r.revealed);
     if (state.revealed) {
       el.develop.hidden = true; el.tabs.hidden = false; el.ssBtn.hidden = false;
-      el.lead.innerHTML = '<span class="live-dot"></span>' + WC.esc(r.admin && !r.revealed ? 'Mode admin: album belum dibuka untuk tamu. ' + sum : sum);
+      paintCount();
       stopCountdown();
     } else {
       el.develop.hidden = false; el.tabs.hidden = true; el.ssBtn.hidden = true;
@@ -64,6 +65,11 @@
     el.more.hidden = !(state.revealed && state.more);
   }
 
+  function paintCount() {
+    const sum = Math.max(state.total, state.items.length).toLocaleString('id-ID') + ' kiriman';
+    el.lead.innerHTML = '<span class="live-dot"></span>' + WC.esc(state.adminPreview ? 'Mode admin: album belum dibuka untuk tamu. ' + sum : sum);
+  }
+
   // Muat dari awal: halaman pertama = kiriman terbaru
   async function load(quiet) {
     if (state.loading) return;
@@ -72,8 +78,28 @@
     try {
       if (!WC.event) throw Object.assign(new Error('Link belum lengkap. Silakan scan ulang kode QR dari mempelai.'), { code: 'NO_EVENT' });
       await WC.queue.load(true);
-      const got = await Promise.all([WC.api('list', { pin: WC.pin() || undefined, mode: 'tail', limit: PAGE }), loadLocal()]);
-      const r = got[0];
+      await loadLocal();
+      state.drive = false;
+      // 1) Tanya script sekali: pengaturan, status album, dan (kalau album sudah dibuka) ID folder Drive-nya
+      if (WC.driveReady() && !state.driveOff) {
+        const cfg = await WC.api('config', { pin: WC.pin() || undefined });
+        if (cfg.folderId) {
+          try {
+            // 2) Daftar foto dibaca LANGSUNG dari Google Drive (tanpa script)
+            const d = await WC.driveList(cfg.folderId, { pageSize: PAGE });
+            state.drive = true; state.folderId = cfg.folderId; state.next = d.next; state.more = !!d.next; state.v = cfg.v; state.polls = 0;
+            state.items = markMine(d.items);
+            paintHeader(cfg);
+            render();
+            state.loading = false;
+            return;
+          } catch (e) {
+            if (e.code === 'DRIVE') state.driveOff = true;      // API key bermasalah: pakai jalur script sampai halaman dimuat ulang
+          }
+        }
+      }
+      // Jalur script (album masih dikunci, tidak ada API key, atau Drive menolak)
+      const r = await WC.api('list', { pin: WC.pin() || undefined, mode: 'tail', limit: PAGE });
       state.items = r.items || [];
       state.cursor = r.cursor || 0; state.floor = r.floor || 1; state.more = !!r.more; state.v = r.v;
       paintHeader(r);
@@ -85,9 +111,47 @@
     state.loading = false;
   }
 
+  function markMine(items) {
+    items.forEach(function (it) { it.mine = it.mine || !!localFor(it.fileId) || WC.mine.has(WC.event, it.fileId); });
+    return items;
+  }
+  // Penyegaran lewat Drive: ambil halaman terbaru, tambahkan yang baru, buang yang sudah dihapus/disembunyikan
+  async function pollDrive() {
+    state.loading = true;
+    try {
+      state.polls++;
+      if (state.polls % 12 === 0) {            // sesekali (kira-kira tiap 3-4 menit) cek ke script: album dikunci lagi? ada yang dihapus? judul berubah?
+        const cfg = await WC.api('config', { pin: WC.pin() || undefined });
+        if (!cfg.folderId || cfg.folderId !== state.folderId || cfg.v !== state.v) { state.loading = false; return load(true); }
+        paintHeader(cfg);
+      }
+      const got = await Promise.all([WC.driveList(state.folderId, { pageSize: PAGE }), loadLocal(), WC.queue.load(true)]);
+      const fresh = markMine(got[0].items);
+      const inPage = {}, have = {};
+      fresh.forEach(function (it) { inPage[it.id] = true; });
+      state.items.forEach(function (it) { have[it.id] = true; });
+      const added = fresh.filter(function (it) { return !have[it.id]; });
+      // Halaman ini memuat semua kiriman yang lebih baru dari `oldest`. Kiriman lama kita yang berada di rentang itu
+      // tapi tidak muncul lagi berarti sudah dihapus/disembunyikan admin.
+      const full = fresh.length >= PAGE;
+      const oldest = fresh.length ? fresh[fresh.length - 1].createdAt : '';
+      const kept = state.items.filter(function (it) { return inPage[it.id] || (full && it.createdAt < oldest); });
+      state.total += added.length - (state.items.length - kept.length);
+      state.items = added.concat(kept).sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : (a.createdAt > b.createdAt ? -1 : 0); });
+      if (state.revealed) paintCount();
+      render();
+      state.slow = 1;
+    } catch (e) {
+      if (e.code === 'DRIVE') { state.driveOff = true; state.loading = false; return load(true); }
+      state.slow = Math.min(8, (state.slow || 1) * 2);
+    }
+    state.loading = false;
+  }
+
   // Penyegaran ringan: hanya menanyakan kiriman SETELAH yang sudah dimiliki
   async function poll() {
     if (state.loading || !WC.event) return;
+    if (state.drive) return pollDrive();
     if (state.own || !state.revealed) { await loadLocal(); render(); return; }       // album terkunci: tidak perlu bertanya ke server
     state.loading = true;
     try {
@@ -115,6 +179,19 @@
   async function loadMore() {
     if (state.busyMore || !state.more || !state.revealed) return;
     state.busyMore = true; el.more.disabled = true; el.more.textContent = 'Memuat…';
+    if (state.drive) {
+      try {
+        const d = await WC.driveList(state.folderId, { pageSize: PAGE, pageToken: state.next });
+        const have = {};
+        state.items.forEach(function (it) { have[it.id] = true; });
+        state.items = state.items.concat(markMine(d.items).filter(function (it) { return !have[it.id]; }));
+        state.next = d.next; state.more = !!d.next;
+        el.more.hidden = !state.more;
+        render();
+      } catch (e) { WC.toast('Belum bisa memuat: ' + e.message); }
+      state.busyMore = false; el.more.disabled = false; el.more.textContent = 'Muat Lebih Banyak';
+      return;
+    }
     try {
       const r = await WC.api('list', { pin: WC.pin() || undefined, mode: 'before', before: state.floor, limit: PAGE });
       if (r.v !== state.v) { state.busyMore = false; el.more.disabled = false; el.more.textContent = 'Muat Lebih Banyak'; return load(true); }
