@@ -102,7 +102,12 @@
       if (typeof r.cursor === 'number') state.cursor = Math.max(state.cursor, r.cursor);
       paintHeader(r);
       render();
-    } catch (e) { /* diam: dicoba lagi pada putaran berikutnya */ }
+      state.slow = 1;                                  // server lancar: kembali ke jeda normal
+    } catch (e) {
+      // server sedang sibuk (mis. banyak tamu memotret bersamaan): album mengalah dulu supaya jalur server dipakai untuk kiriman foto.
+      // Jeda digandakan tiap gagal (maksimal 8x, sekitar 2 menit), lalu normal lagi begitu berhasil.
+      state.slow = Math.min(8, (state.slow || 1) * 2);
+    }
     state.loading = false;
   }
 
@@ -197,8 +202,17 @@
   el.refresh.addEventListener('click', function () { load(); });
 
   /* ---------- segarkan otomatis ---------- */
-  function startPolling() { stopPolling(); state.pollTimer = setInterval(function () { if (!document.hidden) poll(); }, POLL_MS); }
-  function stopPolling() { clearInterval(state.pollTimer); state.pollTimer = null; }
+  function startPolling() {
+    stopPolling();
+    const tick = function () {
+      state.pollTimer = setTimeout(function () {
+        const go = document.hidden ? Promise.resolve() : poll();
+        Promise.resolve(go).then(tick, tick);
+      }, POLL_MS * (state.slow || 1));
+    };
+    tick();
+  }
+  function stopPolling() { clearTimeout(state.pollTimer); state.pollTimer = null; }
   document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
   // jepretan yang baru selesai terkirim dari HP ini: langsung perbarui
   WC.queue.on(function (type, item) { if (item.meta.event === WC.event && (type === 'done' || type === 'rejected')) { if (state.own || !state.revealed) load(true); else poll(); } });
