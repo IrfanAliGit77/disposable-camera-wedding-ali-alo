@@ -75,7 +75,7 @@
 
         <section class="panel card">
             <h2>Kendali Cepat</h2>
-            <p class="sub">Buka kamera saat acara dimulai, tutup saat selesai. Album bisa dibuka kapan saja.</p>
+            <p class="sub">Tombol ini saklar utama. Untuk membuka kamera otomatis di hari acara, isi <b>Kamera dibuka mulai</b> di Pengaturan.</p>
             <div class="row">
                 <button class="btn small" type="button" id="a-toggle-cam">Tutup Kamera</button>
                 <button class="btn small gold" type="button" id="a-toggle-album">Buka Album Sekarang</button>
@@ -131,6 +131,8 @@
                     <label class="field"><span>Tanggal acara</span><input type="date" name="eventDate"></label>
                     <label class="field"><span>Jatah jepretan per tamu</span><input type="number" name="shotsPerGuest" min="1" max="999"></label>
                     <label class="field"><span>Total durasi video per tamu (detik)</span><input type="number" name="maxVideoSeconds" min="5" max="3600"></label>
+                    <label class="field"><span>Kamera dibuka mulai (kosong = langsung bisa)</span><input type="datetime-local" name="opensAt"></label>
+                    <label class="field"><span>Kamera ditutup otomatis pada (opsional)</span><input type="datetime-local" name="closesAt"></label>
                     <label class="field"><span>Mode album</span>
                         <select name="albumMode">
                             <option value="reveal">Dibuka pada waktu tertentu (kejutan)</option>

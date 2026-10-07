@@ -47,13 +47,44 @@
       el.wReveal.textContent = isNaN(t.getTime()) ? 'Semua foto akan "dicuci" dan dibuka bersama di album.'
         : 'Semua foto "dicuci" dulu dan dibuka bersama pada ' + t.toLocaleString('id-ID', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) + '.';
     }
-    el.wClosed.hidden = !!st.cameraOpen;
-    el.start.disabled = !st.cameraOpen || !state.ready;
+    paintPhase();
     el.modeVideo.hidden = !st.allowVideo || typeof MediaRecorder === 'undefined';
     el.libBtn.hidden = !st.allowLibrary;
     el.stamp.textContent = st.dateStamp ? WCFilm.dateText() : '';
     updateCounter();
   }
+
+  // Kamera bisa: belum waktunya ('early'), dibuka ('open'), sudah lewat ('ended'), atau ditutup mempelai ('closed')
+  function phase() {
+    const st = state.settings, now = Date.now();
+    if (!st.cameraOpen) return 'closed';
+    const a = st.opensAt ? new Date(st.opensAt).getTime() : NaN, b = st.closesAt ? new Date(st.closesAt).getTime() : NaN;
+    if (!isNaN(a) && now < a) return 'early';
+    if (!isNaN(b) && now >= b) return 'ended';
+    return 'open';
+  }
+  function paintPhase() {
+    const ph = phase();
+    el.wClosed.hidden = ph === 'open';
+    el.start.disabled = ph !== 'open' || !state.ready;
+    if (ph === 'early') {
+      const t = new Date(state.settings.opensAt), left = t.getTime() - Date.now();
+      const when = t.toLocaleString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const days = Math.floor(left / 86400000), hours = Math.floor((left % 86400000) / 3600000), mins = Math.max(1, Math.ceil((left % 3600000) / 60000));
+      const wait = days > 0 ? days + ' hari lagi' : (hours > 0 ? hours + ' jam ' + mins + ' menit lagi' : mins + ' menit lagi');
+      el.wClosed.innerHTML = '<b>Kamera belum dibuka.</b><br>Kamera ini bisa dipakai untuk mengabadikan momen mulai <b>' + WC.esc(when) + '</b> (' + wait + '). Simpan link ini dan kembali lagi di hari bahagia kami ya.';
+      el.start.textContent = 'Belum Dibuka';
+    } else if (ph === 'ended') {
+      el.wClosed.textContent = 'Kamera sudah ditutup. Terima kasih sudah mengabadikan momen kami. Kamu tetap bisa melihat album.';
+      el.start.textContent = 'Kamera Ditutup';
+    } else if (ph === 'closed') {
+      el.wClosed.textContent = 'Kamera sedang ditutup oleh mempelai. Kamu tetap bisa melihat album.';
+      el.start.textContent = 'Kamera Ditutup';
+    } else {
+      el.start.textContent = 'Mulai Memotret';
+    }
+  }
+  setInterval(function () { if (!el.welcome.hidden) paintPhase(); }, 20000);     // tombol aktif sendiri begitu waktunya tiba
 
   async function loadConfig() {
     if (!WC.event) {

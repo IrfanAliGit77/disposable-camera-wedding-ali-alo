@@ -60,7 +60,7 @@
         b.innerHTML = '<h3>' + WC.esc(ev.name) + '</h3>' +
           '<p class="meta">' + (WC.esc(WC.fmtDateLine(ev.eventDate)) || 'Tanggal belum diisi') + ' · kode: ' + WC.esc(ev.slug) + '</p>' +
           '<p class="big">' + ev.total + '<small>kiriman</small></p>' +
-          '<p class="row" style="margin-top:.8rem"><span class="pill' + (ev.cameraOpen ? '' : ' off') + '">' + (ev.cameraOpen ? 'Kamera dibuka' : 'Kamera ditutup') + '</span>' +
+          '<p class="row" style="margin-top:.8rem"><span class="pill' + (ev.cameraOpen ? '' : ' off') + '">' + ({ open: 'Kamera dibuka', early: 'Kamera terjadwal', ended: 'Kamera selesai', closed: 'Kamera ditutup' }[ev.phase] || (ev.cameraOpen ? 'Kamera dibuka' : 'Kamera ditutup')) + '</span>' +
           '<span class="pill' + (ev.revealed ? '' : ' off') + '">' + (ev.revealed ? 'Album dibuka' : 'Album dikunci') + '</span></p>';
         b.addEventListener('click', function () { openEvent(ev.slug); });
         el.eGrid.appendChild(b);
@@ -133,8 +133,10 @@
     const s = state.settings;
     const title = s.eventTitle || '';
     el.title.textContent = title; el.qrTitle.textContent = title; document.title = 'Dashboard — ' + title;
-    el.pillCam.textContent = s.cameraOpen ? 'Kamera dibuka' : 'Kamera ditutup';
-    el.pillCam.classList.toggle('off', !s.cameraOpen);
+    const now = Date.now(), tA = s.opensAt ? new Date(s.opensAt).getTime() : NaN, tB = s.closesAt ? new Date(s.closesAt).getTime() : NaN;
+    const ph = !s.cameraOpen ? 'closed' : (!isNaN(tA) && now < tA ? 'early' : (!isNaN(tB) && now >= tB ? 'ended' : 'open'));
+    el.pillCam.textContent = ph === 'open' ? 'Kamera dibuka' : ph === 'early' ? 'Kamera dibuka otomatis ' + WC.fmtTime(s.opensAt) : ph === 'ended' ? 'Kamera sudah tutup (jadwal)' : 'Kamera ditutup';
+    el.pillCam.classList.toggle('off', ph !== 'open');
     el.pillAlbum.textContent = state.revealed ? 'Album dibuka' : 'Album masih dikunci';
     el.pillAlbum.classList.toggle('off', !state.revealed);
     el.toggleCam.textContent = s.cameraOpen ? 'Tutup Kamera' : 'Buka Kamera';
@@ -167,6 +169,7 @@
     f.name.value = s.eventTitle || ''; f.eventSubtitle.value = s.eventSubtitle || ''; f.eventDate.value = s.eventDate || '';
     f.shotsPerGuest.value = s.shotsPerGuest; f.maxVideoSeconds.value = s.maxVideoSeconds;
     f.albumMode.value = s.albumMode; f.revealAt.value = toLocalInput(s.revealAt);
+    f.opensAt.value = toLocalInput(s.opensAt); f.closesAt.value = toLocalInput(s.closesAt);
     f.clientPin.value = s.clientPin || '';
     f.allowVideo.checked = !!s.allowVideo; f.allowLibrary.checked = !!s.allowLibrary;
     f.guestsSeeOwn.checked = !!s.guestsSeeOwn; f.dateStamp.checked = !!s.dateStamp;
@@ -191,6 +194,8 @@
     };
     if (state.role === 'master') { patch.name = f.name.value; patch.clientPin = f.clientPin.value; }
     if (f.revealAt.value) patch.revealAt = new Date(f.revealAt.value).toISOString();
+    patch.opensAt = f.opensAt.value ? new Date(f.opensAt.value).toISOString() : '';       // kosong = tanpa jadwal
+    patch.closesAt = f.closesAt.value ? new Date(f.closesAt.value).toISOString() : '';
     el.save.disabled = true;
     await saveSettings(patch);
     el.save.disabled = false;

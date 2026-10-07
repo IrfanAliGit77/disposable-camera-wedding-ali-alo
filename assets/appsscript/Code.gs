@@ -41,7 +41,9 @@ const HIDDEN_FOLDER = '_tersembunyi'; // sub-folder untuk kiriman yang disembuny
 const DEFAULT_SETTINGS = {
   eventSubtitle: 'The Wedding Disposable Camera',
   eventDate: '',
-  cameraOpen: true,
+  cameraOpen: true,               // saklar utama: false = kamera ditutup apa pun jadwalnya
+  opensAt: '',                    // jadwal: kamera baru bisa dipakai mulai waktu ini (kosong = langsung bisa)
+  closesAt: '',                   // jadwal: kamera otomatis tutup pada waktu ini (kosong = tidak otomatis tutup)
   shotsPerGuest: 27,
   allowVideo: true,
   maxVideoSeconds: 300,           // TOTAL durasi video per tamu (detik), boleh dipecah jadi beberapa video
@@ -107,7 +109,7 @@ function setup() {
  *  PINTU MASUK WEB APP
  * ------------------------------------------------------------ */
 function doGet() {
-  return json_({ ok: true, app: 'disposable-camera', version: 5, ready: isReady_(), time: new Date().toISOString() });
+  return json_({ ok: true, app: 'disposable-camera', version: 6, ready: isReady_(), time: new Date().toISOString() });
 }
 
 function doPost(e) {
@@ -158,7 +160,12 @@ function admit_(ev, d) {
   const admin = !!role_(d, ev);
   const source = d.source === 'library' ? 'library' : (d.source === 'cover' ? 'cover' : 'camera');
   if (source === 'cover' && !admin) throw err_('Khusus admin.', 'AUTH');
-  if (!s.cameraOpen && !admin) throw err_('Kamera sedang ditutup oleh mempelai.', 'CLOSED');
+  if (!admin) {
+    const phase = cameraPhase_(s);
+    if (phase === 'early') throw err_('Kamera belum dibuka. Kembali lagi di hari acara ya.', 'CLOSED');
+    if (phase === 'ended') throw err_('Kamera sudah ditutup. Terima kasih sudah mengabadikan momen kami.', 'CLOSED');
+    if (phase === 'closed') throw err_('Kamera sedang ditutup oleh mempelai.', 'CLOSED');
+  }
 
   const mime = String(d.mime || '').split(';')[0].trim().toLowerCase();
   const isImage = mime.indexOf('image/') === 0;
@@ -416,7 +423,7 @@ function actAdminEvents_(d) {
       const sh = ss.getSheetByName(ev.sheetName);
       return {
         slug: ev.slug, name: ev.name, createdAt: ev.createdAt, eventDate: ev.settings.eventDate,
-        cameraOpen: !!ev.settings.cameraOpen, revealed: isRevealed_(ev.settings),
+        cameraOpen: cameraPhase_(ev.settings) === 'open', phase: cameraPhase_(ev.settings), revealed: isRevealed_(ev.settings),
         total: sh ? Math.max(0, sh.getLastRow() - 1) : 0, coverFileId: ev.settings.coverFileId || ''
       };
     }).reverse(),
@@ -458,6 +465,8 @@ function actAdminCreateEvent_(d) {
     settings.eventDate = /^\d{4}-\d{2}-\d{2}$/.test(String(d.eventDate || '')) ? d.eventDate : '';
     if (d.eventSubtitle) settings.eventSubtitle = cleanText_(d.eventSubtitle, 80);
     // default album dibuka pukul 18.00 WIB di hari acara (atau besok kalau tanggal belum diisi)
+    // kamera otomatis baru bisa dipakai mulai pukul 00.00 WIB di hari acara (bisa diubah/dikosongkan di dashboard)
+    settings.opensAt = settings.eventDate ? new Date(settings.eventDate + 'T00:00:00+07:00').toISOString() : '';
     settings.revealAt = settings.eventDate ? new Date(settings.eventDate + 'T18:00:00+07:00').toISOString() : new Date(Date.now() + 24 * 3600 * 1000).toISOString();
 
     const createdAt = new Date().toISOString();
@@ -496,6 +505,8 @@ function actAdminSaveSettings_(d) {
       eventSubtitle: cleanText_(pick_(inp.eventSubtitle, cur.eventSubtitle), 80),
       eventDate: /^\d{4}-\d{2}-\d{2}$/.test(String(pick_(inp.eventDate, cur.eventDate))) ? String(pick_(inp.eventDate, cur.eventDate)) : '',
       cameraOpen: bool_(pick_(inp.cameraOpen, cur.cameraOpen)),
+      opensAt: when_(inp.opensAt, cur.opensAt, 'Waktu kamera dibuka'),
+      closesAt: when_(inp.closesAt, cur.closesAt, 'Waktu kamera ditutup'),
       shotsPerGuest: clamp_(pick_(inp.shotsPerGuest, cur.shotsPerGuest), 1, 999),
       allowVideo: bool_(pick_(inp.allowVideo, cur.allowVideo)),
       maxVideoSeconds: clamp_(pick_(inp.maxVideoSeconds, cur.maxVideoSeconds), 5, 3600),     // TOTAL detik video per tamu
@@ -507,6 +518,9 @@ function actAdminSaveSettings_(d) {
       coverFileId: cur.coverFileId || '',
       clientPin: cur.clientPin || ''
     };
+    if (next.opensAt && next.closesAt && new Date(next.closesAt).getTime() <= new Date(next.opensAt).getTime()) {
+      throw err_('Waktu kamera ditutup harus setelah waktu dibuka.', 'BAD_REQUEST');
+    }
     if (inp.revealAt) {
       const t = new Date(inp.revealAt);
       if (isNaN(t.getTime())) throw err_('Waktu album dibuka tidak valid.', 'BAD_REQUEST');
@@ -704,6 +718,24 @@ function publicSettings_(ev) {
   return s;
 }
 function fullSettings_(ev) { const s = publicSettings_(ev); s.clientPin = ev.settings.clientPin || ''; return s; }
+// Keadaan kamera sekarang: 'closed' (saklar mati) | 'early' (belum waktunya) | 'ended' (sudah lewat) | 'open'
+function cameraPhase_(s) {
+  if (!s.cameraOpen) return 'closed';
+  const now = Date.now();
+  const a = s.opensAt ? new Date(s.opensAt).getTime() : NaN;
+  const b = s.closesAt ? new Date(s.closesAt).getTime() : NaN;
+  if (!isNaN(a) && now < a) return 'early';
+  if (!isNaN(b) && now >= b) return 'ended';
+  return 'open';
+}
+// Baca isian waktu dari dashboard: tidak dikirim = pakai yang lama, kosong = hapus jadwal
+function when_(v, cur, label) {
+  if (v === undefined || v === null) return cur || '';
+  if (v === '') return '';
+  const t = new Date(v);
+  if (isNaN(t.getTime())) throw err_(label + ' tidak valid.', 'BAD_REQUEST');
+  return t.toISOString();
+}
 function isRevealed_(s) {
   if (s.albumMode === 'live') return true;
   const t = new Date(s.revealAt).getTime();
